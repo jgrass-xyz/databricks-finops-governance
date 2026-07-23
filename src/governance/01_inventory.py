@@ -87,12 +87,13 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
     }
     discovered = SYSTEM_DISCOVERERS[collector_name](spark, context)
     enrichment_error = None
-    try:
-        enriched = COLLECTORS[collector_name](w, context)
-    except Exception as error:
-        enriched = []
-        enrichment_error = f"API enrichment failed: {type(error).__name__}: {error}"
-        print(enrichment_error)
+    enriched = []
+    if config.get("api_enrichment", True):
+        try:
+            enriched = COLLECTORS[collector_name](w, context)
+        except Exception as error:
+            enrichment_error = f"API enrichment failed: {type(error).__name__}: {error}"
+            print(enrichment_error)
     collected = merge_discovery_and_enrichment(discovered, enriched)
     asset_rows.extend(collected)
     run_rows.append({
@@ -111,67 +112,60 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
 
 # COMMAND ----------
 
-# Snapshot every current compute policy, not only attached policies. Other policy
-# types currently expose IDs through their assets but not definitions in WorkspaceClient.
+# Policy collection is optional. The compact visibility workflow disables it so
+# inventory remains a bounded system-table scan rather than an API call per policy.
+collect_policies = any(
+    config.get("collect_policies", True)
+    for config in ASSET_TYPES.values()
+    if config.get("enabled", False)
+)
 policy_rows_by_key = {}
 term_rows = []
 compute_policy_names = {}
 
-try:
-    for listed_policy in w.cluster_policies.list():
-        policy_id = str(listed_policy.policy_id)
-        policy = w.cluster_policies.get(policy_id).as_dict()
-        if policy.get("policy_family_id"):
-            family = w.policy_families.get(policy["policy_family_id"]).as_dict()
-            definition = merge_policy_definitions(
-                family.get("definition"), policy.get("policy_family_definition_overrides"))
-            policy["resolved_policy_family"] = family
-        else:
-            definition = parse_definition(policy.get("definition"))
-        compute_policy_names[policy_id] = policy.get("name")
-        policy_rows_by_key[("COMPUTE_POLICY", policy_id)] = {
-            "workspace_id": workspace_id,
-            "collection_run_id": collection_run_id,
-            "snapshot_ts": snapshot_ts,
-            "policy_type": "COMPUTE_POLICY",
-            "policy_id": policy_id,
-            "policy_name": policy.get("name"),
-            "description": policy.get("description"),
-            "definition_json": json.dumps(definition, sort_keys=True),
-            "policy_family_id": policy.get("policy_family_id"),
-            "raw_payload": json.dumps(policy, sort_keys=True, default=str),
-        }
-        for term in flatten_policy_terms(definition):
-            term_rows.append({
-                "workspace_id": workspace_id,
-                "collection_run_id": collection_run_id,
-                "snapshot_ts": snapshot_ts,
-                "policy_type": "COMPUTE_POLICY",
-                "policy_id": policy_id,
-                **term,
-            })
-except Exception as error:
-    print(f"Policy definition enrichment failed: {type(error).__name__}: {error}")
+if collect_policies:
+    try:
+        for listed_policy in w.cluster_policies.list():
+            policy_id = str(listed_policy.policy_id)
+            policy = w.cluster_policies.get(policy_id).as_dict()
+            if policy.get("policy_family_id"):
+                family = w.policy_families.get(policy["policy_family_id"]).as_dict()
+                definition = merge_policy_definitions(
+                    family.get("definition"), policy.get("policy_family_definition_overrides"))
+                policy["resolved_policy_family"] = family
+            else:
+                definition = parse_definition(policy.get("definition"))
+            compute_policy_names[policy_id] = policy.get("name")
+            policy_rows_by_key[("COMPUTE_POLICY", policy_id)] = {
+                "workspace_id": workspace_id, "collection_run_id": collection_run_id,
+                "snapshot_ts": snapshot_ts, "policy_type": "COMPUTE_POLICY",
+                "policy_id": policy_id, "policy_name": policy.get("name"),
+                "description": policy.get("description"),
+                "definition_json": json.dumps(definition, sort_keys=True),
+                "policy_family_id": policy.get("policy_family_id"),
+                "raw_payload": json.dumps(policy, sort_keys=True, default=str),
+            }
+            for term in flatten_policy_terms(definition):
+                term_rows.append({
+                    "workspace_id": workspace_id, "collection_run_id": collection_run_id,
+                    "snapshot_ts": snapshot_ts, "policy_type": "COMPUTE_POLICY",
+                    "policy_id": policy_id, **term,
+                })
+    except Exception as error:
+        print(f"Policy definition enrichment failed: {type(error).__name__}: {error}")
 
-# Add policy IDs observed on jobs/endpoints even when their definition API is not
-# exposed by this workspace client. This preserves attachment history immediately.
-for asset in asset_rows:
-    for policy in asset["policies"]:
-        if policy["policy_type"] == "COMPUTE_POLICY":
-            policy["policy_name"] = compute_policy_names.get(policy["policy_id"])
-        key = (policy["policy_type"], policy["policy_id"])
-        policy_rows_by_key.setdefault(key, {
-            "workspace_id": workspace_id,
-            "collection_run_id": collection_run_id,
-            "snapshot_ts": snapshot_ts,
-            "policy_type": policy["policy_type"],
-            "policy_id": policy["policy_id"],
-            "policy_name": policy.get("policy_name"),
-            "description": None,
-            "definition_json": None,
-            "policy_family_id": None,
-            "raw_payload": None,
-        })
+    for asset in asset_rows:
+        for policy in asset["policies"]:
+            if policy["policy_type"] == "COMPUTE_POLICY":
+                policy["policy_name"] = compute_policy_names.get(policy["policy_id"])
+            key = (policy["policy_type"], policy["policy_id"])
+            policy_rows_by_key.setdefault(key, {
+                "workspace_id": workspace_id, "collection_run_id": collection_run_id,
+                "snapshot_ts": snapshot_ts, "policy_type": policy["policy_type"],
+                "policy_id": policy["policy_id"], "policy_name": policy.get("policy_name"),
+                "description": None, "definition_json": None,
+                "policy_family_id": None, "raw_payload": None,
+            })
 
 policy_rows = list(policy_rows_by_key.values())
 
