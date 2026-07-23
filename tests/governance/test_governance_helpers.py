@@ -10,10 +10,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 GOVERNANCE_SRC = os.path.join(ROOT, "src", "governance")
 sys.path.insert(0, GOVERNANCE_SRC)
 
-from _collectors import COST_RESOLVERS, collect_clusters, collect_jobs, collect_serving_endpoints
+from _collectors import COST_RESOLVERS, collect_clusters, collect_jobs, collect_serving_endpoints, collect_warehouses
 from _normalize import evaluate_requirements, merge_discovery_and_enrichment
 from _policy_terms import flatten_policy_terms, merge_policy_definitions
-from _system_discovery import _cluster_sql, _job_sql, _serving_endpoint_sql
+from _system_discovery import _cluster_sql, _job_sql, _serving_endpoint_sql, _warehouse_sql
 
 
 class Object:
@@ -39,10 +39,11 @@ class JobsAPI(API):
 
 
 class Client:
-    def __init__(self, clusters=None, jobs=None, endpoints=None):
+    def __init__(self, clusters=None, jobs=None, endpoints=None, warehouses=None):
         self.clusters = API(clusters or [])
         self.jobs = JobsAPI(jobs or [])
         self.serving_endpoints = API(endpoints or [])
+        self.warehouses = API(warehouses or [])
 
 
 CONTEXT = {
@@ -135,11 +136,11 @@ class GovernanceHelperTests(unittest.TestCase):
         self.assertEqual({"product": "fraud"}, rows[0]["tags"])
         self.assertEqual("BUDGET_POLICY", rows[0]["policies"][0]["policy_type"])
 
-    def test_demo_config_enables_all_three_adapters(self):
+    def test_demo_config_enables_all_shipped_adapters(self):
         config = runpy.run_path(os.path.join(ROOT, "config", "governance_assets.py"))[
             "ASSET_TYPES"]
         self.assertEqual(
-            {"cluster", "job", "serving_endpoint"},
+            {"cluster", "job", "serving_endpoint", "warehouse"},
             {key for key, value in config.items() if value["enabled"]},
         )
 
@@ -185,11 +186,34 @@ class GovernanceHelperTests(unittest.TestCase):
         self.assertEqual({"team": "finance", "product": "ledger"}, merged[0]["tags"])
         self.assertEqual("BUDGET_POLICY", merged[0]["policies"][0]["policy_type"])
 
+    def test_warehouse_collector_normalizes_api_tag_shape(self):
+        client = Client(warehouses=[{
+            "id": "abc123",
+            "name": "team-bi-warehouse",
+            "creator_name": "owner@example.com",
+            "state": "RUNNING",
+            "tags": {"custom_tags": [
+                {"key": "application", "value": "bi"},
+                {"key": "", "value": "dropped"},
+            ]},
+        }])
+        rows = collect_warehouses(client, dict(CONTEXT, product="SQL", asset_type="warehouse"))
+        self.assertEqual(1, len(rows))
+        self.assertEqual("abc123", rows[0]["asset_id"])
+        self.assertEqual({"application": "bi"}, rows[0]["tags"])
+        self.assertEqual([], rows[0]["policies"])
+
+    def test_warehouse_cost_resolver_scopes_to_sql_product(self):
+        resolver = COST_RESOLVERS["warehouse"]
+        self.assertIn("'SQL'", resolver["extra_filter_sql"])
+        self.assertIn("warehouse_id", resolver["asset_id_sql"])
+
     def test_system_discovery_queries_preserve_latest_non_deleted_assets(self):
         for sql, table in (
             (_cluster_sql("123"), "system.compute.clusters"),
             (_job_sql("123"), "system.lakeflow.jobs"),
             (_serving_endpoint_sql("123"), "system.serving.served_entities"),
+            (_warehouse_sql("123"), "system.compute.warehouses"),
         ):
             self.assertIn(table, sql)
             self.assertIn("ROW_NUMBER()", sql)

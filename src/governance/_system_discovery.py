@@ -55,10 +55,24 @@ def _serving_endpoint_sql(workspace_id):
     """
 
 
+def _warehouse_sql(workspace_id):
+    return f"""
+      SELECT warehouse_id, warehouse_name, warehouse_type, warehouse_size,
+             created_by, tags, change_time, delete_time
+      FROM system.compute.warehouses
+      WHERE workspace_id = '{_literal(workspace_id)}'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY workspace_id, warehouse_id ORDER BY change_time DESC
+      ) = 1
+        AND delete_time IS NULL
+    """
+
+
 DISCOVERY_SQL = {
     "clusters": _cluster_sql,
     "jobs": _job_sql,
     "serving_endpoints": _serving_endpoint_sql,
+    "warehouses": _warehouse_sql,
 }
 
 
@@ -136,8 +150,31 @@ def discover_serving_endpoints(spark, context):
     return assets
 
 
+def discover_warehouses(spark, context):
+    assets = []
+    for row in spark.sql(_warehouse_sql(context["workspace_id"])).collect():
+        value = row.asDict(recursive=True)
+        assets.append(asset_record(
+            **context,
+            asset_id=value["warehouse_id"],
+            asset_name=value.get("warehouse_name"),
+            owner=value.get("created_by"),
+            lifecycle_state="ACTIVE",
+            tags=value.get("tags"),
+            policies=[],
+            discovery_source="SYSTEM_TABLE",
+            api_enriched=False,
+            tag_observation_complete=True,
+            # SQL warehouses expose no policy attachment; nothing to observe.
+            policy_observation_complete=True,
+            raw_payload=_raw(value),
+        ))
+    return assets
+
+
 SYSTEM_DISCOVERERS = {
     "clusters": discover_clusters,
     "jobs": discover_jobs,
     "serving_endpoints": discover_serving_endpoints,
+    "warehouses": discover_warehouses,
 }

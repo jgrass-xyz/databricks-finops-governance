@@ -117,10 +117,32 @@ def collect_serving_endpoints(client, context):
     return rows
 
 
+def collect_warehouses(client, context):
+    rows = []
+    for warehouse in client.warehouses.list():
+        raw = warehouse.as_dict()
+        # API tag shape is {"custom_tags": [{"key":..., "value":...}]};
+        # normalize_tags handles the key/value-list form.
+        tags = (raw.get("tags") or {}).get("custom_tags")
+        rows.append(asset_record(
+            **context,
+            asset_id=raw.get("id"),
+            asset_name=raw.get("name"),
+            owner=raw.get("creator_name"),
+            lifecycle_state=str(raw.get("state") or "UNKNOWN"),
+            tags=tags,
+            # SQL warehouses expose no policy attachment surface today.
+            policies=[],
+            raw_payload=json.dumps(raw, sort_keys=True, default=str),
+        ))
+    return rows
+
+
 COLLECTORS = {
     "clusters": collect_clusters,
     "jobs": collect_jobs,
     "serving_endpoints": collect_serving_endpoints,
+    "warehouses": collect_warehouses,
 }
 
 
@@ -141,6 +163,15 @@ COST_RESOLVERS = {
         "extra_filter_sql": (
             "u.billing_origin_product = 'MODEL_SERVING' "
             "AND u.usage_metadata.endpoint_name IS NOT NULL"
+        ),
+    },
+    "warehouse": {
+        "asset_id_sql": "u.usage_metadata.warehouse_id",
+        # warehouse_id is only populated for SQL usage; the product filter keeps
+        # future products that reuse the field from silently joining here.
+        "extra_filter_sql": (
+            "u.billing_origin_product = 'SQL' "
+            "AND u.usage_metadata.warehouse_id IS NOT NULL"
         ),
     },
 }

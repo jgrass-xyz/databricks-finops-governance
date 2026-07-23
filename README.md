@@ -3,8 +3,8 @@
 Databricks FinOps and asset-governance toolkit. It combines system-table cost
 attribution, tag and policy coverage, historical asset inventory, billing
 reconciliation, classic-compute anomaly detection, and optional Slack alerting.
-The governance adapters currently cover classic clusters, jobs, and Model
-Serving endpoints.
+The governance adapters currently cover classic clusters, jobs, Model
+Serving endpoints, and SQL warehouses.
 
 All deployment values are generic and every schedule is paused by default. See
 [`SECURITY.md`](SECURITY.md) before adding workspace-specific configuration.
@@ -39,8 +39,8 @@ Under `${catalog}.${schema}` (defaults `main.finops_observability`):
 
 ## Asset governance views
 
-The governance module currently enables classic clusters, jobs, and serving
-endpoints in `config/governance_assets.py`. Its Silver inventory, requirement,
+The governance module currently enables classic clusters, jobs, serving
+endpoints, and SQL warehouses in `config/governance_assets.py`. Its Silver inventory, requirement,
 policy, and cost snapshots are Delta tables; its Gold dashboard objects are
 regular views:
 
