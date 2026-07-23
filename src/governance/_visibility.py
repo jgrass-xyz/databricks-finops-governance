@@ -74,26 +74,41 @@ def resolve_direct_owners(account_client, account_id, application_id):
         return [], "ERROR", f"{type(error).__name__}: {error}"
 
 
-def collect_service_principals(workspace_client, account_client=None, account_id=None):
-    """Collect workspace SP inventory and account-level direct manager grants."""
+def collect_service_principals(
+    workspace_client, account_client=None, account_id=None, asset_owners=None,
+):
+    """List principals once; resolve managers only for principals owning assets.
+
+    ``asset_owners=None`` resolves every principal for backwards compatibility.
+    Supplying owner values avoids an account API call per unrelated principal.
+    """
     principal_api = workspace_client.service_principals
     listed_principals = list(principal_api.list())
+    owner_keys = (
+        None if asset_owners is None else
+        {str(value).strip().casefold() for value in asset_owners if str(value).strip()}
+    )
 
     rows = []
     for listed in listed_principals:
         raw = _as_dict(listed)
         principal_id = raw.get("id")
-        try:
-            raw = _as_dict(principal_api.get(str(principal_id)))
-        except Exception:
-            pass
         application_id = raw.get("application_id") or raw.get("applicationId")
-        owners, status, error = resolve_direct_owners(
-            account_client, account_id, application_id)
+        display_name = raw.get("display_name") or raw.get("displayName")
+        aliases = {
+            str(value).strip().casefold()
+            for value in (principal_id, application_id, display_name)
+            if value is not None and str(value).strip()
+        }
+        if owner_keys is not None and aliases.isdisjoint(owner_keys):
+            owners, status, error = [], "NOT_REQUESTED", None
+        else:
+            owners, status, error = resolve_direct_owners(
+                account_client, account_id, application_id)
         rows.append({
             "service_principal_id": str(principal_id),
             "application_id": application_id,
-            "display_name": raw.get("display_name") or raw.get("displayName"),
+            "display_name": display_name,
             "active": bool(raw.get("active", True)),
             "direct_owners": owners,
             "owner_resolution_status": status,

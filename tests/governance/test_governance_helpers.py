@@ -246,7 +246,10 @@ class GovernanceHelperTests(unittest.TestCase):
                 return Object({"id": user_id, "user_name": "platform@example.com"})
 
         workspace = type("Workspace", (), {})()
-        workspace.service_principals = PrincipalAPI([{"id": "sp-1"}])
+        workspace.service_principals = PrincipalAPI([{
+            "id": "sp-1", "application_id": "app-123",
+            "display_name": "daily-loader", "active": False,
+        }])
         account = type("Account", (), {
             "access_control": AccessControlAPI(), "users": UserAPI(),
         })()
@@ -258,6 +261,21 @@ class GovernanceHelperTests(unittest.TestCase):
         self.assertEqual("RESOLVED", rows[0]["owner_resolution_status"])
         self.assertEqual("sp-1", match_owner_to_principal("APP-123", rows)[
             "service_principal_id"])
+
+    def test_manager_resolution_is_skipped_for_unrelated_principals(self):
+        class PrincipalAPI(API):
+            def get(self, _principal_id):
+                raise AssertionError("per-principal get must not be called")
+
+        workspace = type("Workspace", (), {})()
+        workspace.service_principals = PrincipalAPI([{
+            "id": "sp-1", "application_id": "app-1",
+            "display_name": "unrelated-loader", "active": True,
+        }])
+        rows = collect_service_principals(
+            workspace, object(), "acct-1", asset_owners=["different-owner"])
+        self.assertEqual("NOT_REQUESTED", rows[0]["owner_resolution_status"])
+        self.assertEqual([], rows[0]["direct_owners"])
 
     def test_manager_api_absence_degrades_visibly(self):
         owners, status, error = resolve_direct_owners(object(), "acct-1", "app-1")

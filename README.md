@@ -79,9 +79,12 @@ Direct-owner lookup uses `AccountClient.access_control` to read direct
 `roles/servicePrincipal.manager` grants; groups are retained without expansion.
 Set `visibility_account_id` when it is not available from account credentials.
 SDK version, account credentials, and cloud support vary, so absence or permission
-failure does not fail principal collection: `owner_resolution_status`
-is `UNAVAILABLE` or `ERROR`, with details in `owner_resolution_error`. Empty
-`direct_owners` must therefore not be interpreted as proof that no owner exists.
+failure does not fail principal collection. Manager lookup is requested only for
+service principals that currently own a configured asset, avoiding one account API
+call for every unrelated workspace principal. `owner_resolution_status` is
+`NOT_REQUESTED`, `UNAVAILABLE`, `ERROR`, or `RESOLVED`, with details in
+`owner_resolution_error`. Empty `direct_owners` must therefore not be interpreted
+as proof that no owner exists.
 
 Empty `required_tags` or `required_policies` arrays put that dimension in discovery
 mode (`NOT_CONFIGURED`) without hiding observed values. Metadata that cannot be

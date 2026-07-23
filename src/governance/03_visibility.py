@@ -50,7 +50,30 @@ except Exception as error:
     account_id = ACCOUNT_ID
     print(f"AccountClient unavailable; direct owners will be marked unavailable: {error}")
 
-principal_rows = collect_service_principals(w, account_client, account_id)
+# Inventory already contains the owner/run-as values relevant to this pipeline.
+# Collect them in one Spark query, then make account manager calls only for matching
+# service principals instead of looping through every workspace principal.
+asset_owners = [
+    row["owner"] for row in spark.sql(f"""
+      WITH latest AS (
+        SELECT workspace_id, asset_type, collection_run_id
+        FROM (
+          SELECT workspace_id, asset_type, collection_run_id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY workspace_id, asset_type ORDER BY snapshot_ts DESC
+                 ) AS row_num
+          FROM {CATALOG_SCHEMA}.governance_silver_collection_run
+          WHERE status = 'SUCCESS'
+        ) WHERE row_num = 1
+      )
+      SELECT DISTINCT a.owner
+      FROM {CATALOG_SCHEMA}.governance_silver_asset_inventory_snapshot a
+      JOIN latest l USING (workspace_id, asset_type, collection_run_id)
+      WHERE a.owner IS NOT NULL AND TRIM(a.owner) != ''
+    """).collect()
+]
+principal_rows = collect_service_principals(
+    w, account_client, account_id, asset_owners=asset_owners)
 for row in principal_rows:
     row.update({"workspace_id": workspace_id, "snapshot_ts": snapshot_ts})
 
@@ -216,9 +239,13 @@ WITH cost AS (
 SELECT * EXCEPT (match_number) FROM joined WHERE match_number = 1
 """)
 
+requested = sum(
+    row["owner_resolution_status"] != "NOT_REQUESTED" for row in principal_rows)
 unavailable = sum(
-    row["owner_resolution_status"] != "RESOLVED" for row in principal_rows)
+    row["owner_resolution_status"] in {"UNAVAILABLE", "ERROR"}
+    for row in principal_rows)
 print(
     f"Published visibility outputs for {len(principal_rows)} service principals; "
-    f"direct-owner resolution unavailable/failed for {unavailable}"
+    f"requested direct owners for {requested} asset-owning principals; "
+    f"unavailable/failed for {unavailable}"
 )
