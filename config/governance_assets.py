@@ -32,4 +32,13 @@ ASSET_TYPES = {
         "required_tags": ["cost_center", "product", "owner"],
         "required_policies": ["BUDGET_POLICY"],
     },
+    "warehouse": {
+        "enabled": True,
+        "product": "SQL",
+        "collector": "warehouses",
+        "cost_resolver": "warehouse",
+        "required_tags": ["cost_center", "product", "owner"],
+        # SQL warehouses expose no policy attachment surface; discovery mode.
+        "required_policies": [],
+    },
 }
