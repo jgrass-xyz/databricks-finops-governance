@@ -33,3 +33,12 @@ resources:
               schema: ${var.schema}
               correction_lookback_days: ${var.governance_cost_lookback_days}
               initial_backfill_days: ${var.governance_cost_initial_backfill_days}
+        - task_key: visibility
+          depends_on:
+            - task_key: cost_rollup
+          notebook_task:
+            notebook_path: ../src/governance/03_visibility.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              billing_tag_key: ${var.visibility_billing_tag_key}

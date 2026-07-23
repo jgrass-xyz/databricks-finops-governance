@@ -58,6 +58,29 @@ or its cost appears in Gold.
 | `governance_gold_config_history` | Requirement/configuration history across collection runs. |
 | `governance_gold_observed_tags_policies_current` | Current observed tag values and policy IDs with asset counts and trailing cost. |
 
+### Compact asset visibility outputs
+
+The final `visibility` task is an isolated, policy-free presentation layer. It
+reuses the governance inventory and billing rollups rather than changing their
+contracts:
+
+| Output | Purpose |
+|---|---|
+| `visibility_service_principals_current` | Current workspace service principals (SDK only): principal/application IDs, display name, active state, direct owners, and explicit owner-resolution status/error. |
+| `visibility_assets_current` | Current configured assets with `ARRAY<STRUCT<key,value>>` tags and a direct owner-to-service-principal match by principal ID, application ID, or display name. |
+| `visibility_asset_cost_daily` | Historical daily configured-asset costs, selected billing tag, inventory status, and owner/service-principal identity. Billing-only and missing-tag rows are retained. |
+
+Set `visibility_billing_tag_key` (default `cost_center`) to choose the custom
+billing tag projected into the daily output. Cost correction lookback remains 35
+days by default; initial history follows `governance_cost_initial_backfill_days`.
+The dev and production schedule remains `PAUSED`.
+
+Direct-owner lookup uses the optional `AccountClient.service_principal_manager`
+surface. SDK version, account credentials, and cloud support vary, so absence or
+permission failure does not fail principal collection: `owner_resolution_status`
+is `UNAVAILABLE` or `ERROR`, with details in `owner_resolution_error`. Empty
+`direct_owners` must therefore not be interpreted as proof that no owner exists.
+
 Empty `required_tags` or `required_policies` arrays put that dimension in discovery
 mode (`NOT_CONFIGURED`) without hiding observed values. Metadata that cannot be
 observed without API enrichment is `UNKNOWN`, not incorrectly `NOT_APPLIED`.
@@ -121,6 +144,7 @@ Tag, policy, and requirement changes follow the same snapshot behavior.
 | `baseline_lookback_days` | `30` | History window used for the baseline distribution. |
 | `governance_cost_lookback_days` | `35` | Rolling usage window rebuilt to absorb corrections and late billing records. |
 | `governance_cost_initial_backfill_days` | `365` | History loaded once when an asset type is first enabled. Reduce this before first deployment if desired. |
+| `visibility_billing_tag_key` | `cost_center` | Selected custom billing tag in `visibility_asset_cost_daily`. |
 | `slack_secret_scope` | `databricks-cost-alerts` | Databricks secret scope holding the Slack bot token. |
 | `slack_secret_key` | `slack-bot-token` | Key inside the scope holding the `xoxb-...` token. |
 | `slack_routing_mode` | `channel_only` | `channel_only` posts every alert to `slack_alert_channel`. `dm_with_fallback` DMs cluster owners and falls back to the channel for unmatched emails. |

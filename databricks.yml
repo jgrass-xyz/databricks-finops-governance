@@ -35,6 +35,9 @@ variables:
   governance_cost_initial_backfill_days:
     description: Billing history loaded the first time an asset type is enabled.
     default: "365"
+  visibility_billing_tag_key:
+    description: Billing custom-tag key selected in the compact historical visibility output.
+    default: cost_center
   notifications_email:
     description: Email to CC on job failures. Leave empty to disable.
     default: ""
