@@ -31,8 +31,15 @@ if _notebook_dir not in sys.path:
     sys.path.insert(0, _notebook_dir)
 from _collectors import COST_RESOLVERS
 
+# A gitignored config/governance_assets_local.py takes precedence when present,
+# so customer-specific requirements never need to be committed (same pattern as
+# config/excluded_clusters.py).
 _config_path = os.path.abspath(os.path.join(
-    _notebook_dir, "..", "..", "config", "governance_assets.py"))
+    _notebook_dir, "..", "..", "config", "governance_assets_local.py"))
+if not os.path.exists(_config_path):
+    _config_path = os.path.abspath(os.path.join(
+        _notebook_dir, "..", "..", "config", "governance_assets.py"))
+print(f"Loading asset requirements from {os.path.basename(_config_path)}")
 ASSET_TYPES = runpy.run_path(_config_path)["ASSET_TYPES"]
 workspace_id = str(WorkspaceClient().get_workspace_id())
 

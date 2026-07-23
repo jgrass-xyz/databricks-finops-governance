@@ -31,8 +31,15 @@ from _normalize import merge_discovery_and_enrichment
 from _policy_terms import flatten_policy_terms, merge_policy_definitions, parse_definition
 from _system_discovery import SYSTEM_DISCOVERERS
 
+# A gitignored config/governance_assets_local.py takes precedence when present,
+# so customer-specific requirements never need to be committed (same pattern as
+# config/excluded_clusters.py).
 _config_path = os.path.abspath(os.path.join(
-    _notebook_dir, "..", "..", "config", "governance_assets.py"))
+    _notebook_dir, "..", "..", "config", "governance_assets_local.py"))
+if not os.path.exists(_config_path):
+    _config_path = os.path.abspath(os.path.join(
+        _notebook_dir, "..", "..", "config", "governance_assets.py"))
+print(f"Loading asset requirements from {os.path.basename(_config_path)}")
 ASSET_TYPES = runpy.run_path(_config_path)["ASSET_TYPES"]
 
 w = WorkspaceClient()
