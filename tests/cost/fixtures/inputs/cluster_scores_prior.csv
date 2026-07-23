@@ -1,0 +1,4 @@
+snapshot_ts,workspace_id,cluster_id,cluster_name,creator,cluster_source,node_type,driver_node_type,num_workers,photon,sku_name,dbu_per_hour,dollars_per_hour,projected_daily_dollars,baseline_mean,baseline_stddev,z_score,signal,reason
+2026-06-04T11:50:00.000+00:00,9999999999999999,old-warning-A1,legacy-warn,oldjane@example.com,UI,r5d.2xlarge,r5d.2xlarge,10,true,PREMIUM_ALL_PURPOSE_COMPUTE_PHOTON_USD,55.0,41.8,1003.20,200.0,350.0,2.3,WARNING,log-z=2.3 > warning 2.0
+2026-06-04T11:45:00.000+00:00,9999999999999999,old-critical-B2,legacy-crit,oldbob@example.com,UI,r5d.24xlarge,r5d.24xlarge,12,true,PREMIUM_ALL_PURPOSE_COMPUTE_PHOTON_USD,780.0,592.8,14227.2,200.0,350.0,4.3,CRITICAL,projected_daily $14227 > budget $5000
+2026-06-04T11:55:00.000+00:00,9999999999999999,old-ok-C3,legacy-ok,oldjane@example.com,UI,m5.large,m5.large,2,false,STANDARD_ALL_PURPOSE_COMPUTE_USD,1.2,0.48,11.52,200.0,350.0,-2.1,OK,within thresholds

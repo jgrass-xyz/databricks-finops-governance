@@ -1,0 +1,112 @@
+bundle:
+  name: databricks-finops-governance
+
+# ---------------------------------------------------------------------------
+# First deploy to a new workspace? See README.md "Deploying to a new workspace".
+# Minimum you'll likely want to review before `databricks bundle deploy`:
+#   - `catalog` + `schema`   -> where tables land
+#   - `budget_daily_dollars` -> absolute $/day per cluster alert threshold
+#   - `notifications_email`  -> if you want job-failure emails
+# Host is picked up from your CLI profile; no workspace URL is hardcoded.
+# ---------------------------------------------------------------------------
+
+variables:
+  catalog:
+    description: UC catalog for all tables written by this bundle.
+    default: main
+  schema:
+    description: UC schema (created if missing).
+    default: finops_observability
+  budget_daily_dollars:
+    description: Absolute backstop — cluster projected > this flips to CRITICAL regardless of z-score.
+    default: "5000"
+  z_warning:
+    description: Z-score threshold for WARNING tier.
+    default: "3.0"
+  z_critical:
+    description: Z-score threshold for CRITICAL tier.
+    default: "4.0"
+  baseline_lookback_days:
+    description: Days of system.billing.usage history used for the workspace baseline distribution.
+    default: "30"
+  governance_cost_lookback_days:
+    description: Rolling billing correction window rebuilt by the governance job.
+    default: "35"
+  governance_cost_initial_backfill_days:
+    description: Billing history loaded the first time an asset type is enabled.
+    default: "365"
+  notifications_email:
+    description: Email to CC on job failures. Leave empty to disable.
+    default: ""
+  deploy_root_path:
+    description: |
+      Workspace root path for `mode: production` deploys (prod requires an explicit
+      path so only one copy is deployed). Parameterized so no user identity is baked
+      in — override with `--var deploy_root_path=...` or edit the default. Dev infers
+      its path from your CLI profile and needs no value here.
+    default: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+
+  # ---- Slack alert routing (03_slack_alerting) ----
+  slack_secret_scope:
+    description: Databricks secret scope holding the Slack bot token.
+    default: databricks-cost-alerts
+  slack_secret_key:
+    description: Key inside `slack_secret_scope` holding the bot token (xoxb-...).
+    default: slack-bot-token
+  slack_routing_mode:
+    description: |
+      `channel_only` posts every alert to `slack_alert_channel`
+      (recommended during testing).
+      `dm_with_fallback` DMs each cluster owner via users.lookupByEmail and
+      falls back to `slack_alert_channel` when the email isn't in Slack.
+    default: channel_only
+  slack_tee_to_channel:
+    description: |
+      When `true` (default), alerts that are DMed to a cluster owner also post a
+      copy to `slack_alert_channel` so there's a central feed of everything sent.
+      Only affects `dm_with_fallback` mode; fallback-to-channel alerts are never
+      duplicated. Set `false` to send owners a DM only.
+    default: "false"
+  slack_alert_channel:
+    description: |
+      Channel name (`#name`) or ID (`C0...`). Primary destination in
+      `channel_only` mode; fallback in `dm_with_fallback` mode. Bot must be
+      a member unless it has `chat:write.public`. No default — must be set.
+    default: ""
+  warning_suppression_hours:
+    description: Hours to suppress repeat WARNING messages for the same cluster.
+    default: "24"
+  critical_suppression_hours:
+    description: Hours to suppress repeat CRITICAL messages for the same cluster.
+    default: "4"
+  slack_workspace_host:
+    description: |
+      Workspace host (e.g. `example-workspace.cloud.databricks.com`) used to build
+      cluster deep-link URLs in Slack alerts. Leave empty to auto-detect from
+      the runtime context — set explicitly when auto-detection is wrong
+      (PrivateLink, custom domains) or when you want a specific host.
+    default: ""
+
+include:
+  - resources/*.yml
+
+# A local config/excluded_clusters.py is ignored by Git but included in bundle sync
+# when present. Otherwise notebooks fall back to excluded_clusters.example.py.
+sync:
+  include:
+    - config/excluded_clusters*.py
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      schema: finops_observability_dev
+    # Workspace host + root_path are inferred from your CLI profile and current user.
+    # Override by adding a `workspace:` block here if you want a specific location.
+  prod:
+    mode: production
+    # root_path comes from the parameterized `deploy_root_path` variable so no user
+    # identity is hardcoded. Host is inferred from your CLI profile.
+    workspace:
+      root_path: ${var.deploy_root_path}

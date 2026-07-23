@@ -1,0 +1,35 @@
+resources:
+  jobs:
+    asset_governance_refresh:
+      name: databricks-finops-governance | asset_governance_refresh
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: America/Los_Angeles
+        # Enable only after validating the initial backfill cost in your workspace.
+        pause_status: PAUSED
+      tasks:
+        # Notebook tasks without a cluster declaration run on serverless jobs compute.
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/governance/00_setup.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+        - task_key: inventory
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../src/governance/01_inventory.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+        - task_key: cost_rollup
+          depends_on:
+            - task_key: inventory
+          notebook_task:
+            notebook_path: ../src/governance/02_cost_rollup.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              correction_lookback_days: ${var.governance_cost_lookback_days}
+              initial_backfill_days: ${var.governance_cost_initial_backfill_days}

@@ -1,0 +1,2 @@
+workspace_id,computed_at,lookback_days,n_cluster_days,mean_daily_dollars,stddev_daily_dollars,p50_daily_dollars,p90_daily_dollars,p95_daily_dollars,p99_daily_dollars,max_daily_dollars,mean_log_daily_dollars,stddev_log_daily_dollars
+9999999999999999,2026-06-01T02:00:00Z,30,420,200.0,350.0,100.0,500.0,800.0,1500.0,4200.0,4.605,1.0

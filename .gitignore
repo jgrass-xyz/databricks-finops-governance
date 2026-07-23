@@ -1,0 +1,8 @@
+.databricks/
+.DS_Store
+*.pyc
+__pycache__/
+
+# Local exclusions may contain workspace identifiers, names, and principals.
+# Keep them out of Git; use config/excluded_clusters.example.py as the template.
+config/excluded_clusters.py

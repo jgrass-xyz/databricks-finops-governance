@@ -1,0 +1,3 @@
+event_ts,event_type,detector_name,workspace_id,record_id,asset_type,asset_id,asset_name,severity,recipient,routing,message_ts,plain,blocks,details_json
+2026-06-04 07:00:00,message_sent,cluster_cost,9999999999999999,prior-record-zcrit-crit,cluster,c-zcrit-004,ml-training-huge,CRITICAL,#cost-alerts,channel_only,1.716900000000002E9,CRITICAL: cluster ml-training-huge projected at $2827/day (~1313% above average),[],{}
+2026-06-04 11:00:00,message_sent,cluster_cost,9999999999999999,prior-record-zstat-warn,cluster,c-zstat-003,ml-training-mid,WARNING,#cost-alerts,channel_only,1.717000000000001E9,WARNING: cluster ml-training-mid projected at $1003/day (~400% above average),[],{}

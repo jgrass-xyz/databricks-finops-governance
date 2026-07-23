@@ -1,0 +1,97 @@
+flowchart TD
+    START([Job triggers on schedule\nevery 30 min])
+
+    START --> VALIDATE_CHANNEL
+
+    subgraph CONFIG["Validate Config"]
+        VALIDATE_CHANNEL{alert_channel\nwidget set?}
+        FAIL_CHANNEL[/Raise RuntimeError\n fail loud/]
+        READ_CONFIG[Read routing_mode\nwarning_suppression_hours\ncritical_suppression_hours]
+        VALIDATE_CHANNEL -- no --> FAIL_CHANNEL
+        VALIDATE_CHANNEL -- yes --> READ_CONFIG
+    end
+
+    READ_CONFIG --> AUTH_TEST
+
+    subgraph SLACK_AUTH["Verify Slack Token"]
+        AUTH_TEST["Slack API: auth.test"]
+        AUTH_FAIL[/Raise SlackError\n fail loud/]
+        AUTH_OK[Token valid\nbot_id confirmed]
+        AUTH_TEST -- error / bad scope --> AUTH_FAIL
+        AUTH_TEST -- ok --> AUTH_OK
+    end
+
+    AUTH_OK --> QUERY_CANDIDATES
+
+    subgraph SUPPRESSION["Query Candidates + Apply Suppression"]
+        QUERY_CANDIDATES["Read: cluster_alerts_latest\nLEFT JOIN alert_send_log\nWHERE workspace_id matches"]
+        SUPPRESS_LOGIC["Filter: skip rows where\nlast_sent_at IS NOT NULL\nAND within suppression window\nWARNING=24h, CRITICAL=4h defaults"]
+        READ_BASELINE["Read: workspace_baseline\nSELECT mean_daily_dollars\nORDER BY computed_at DESC LIMIT 1"]
+        BASELINE_CHECK{Baseline row\nfound?}
+        BASELINE_NONE[BASELINE_MEAN = None\n% will show '?']
+        BASELINE_SET[BASELINE_MEAN = float\nmean_daily_dollars]
+        QUERY_CANDIDATES --> SUPPRESS_LOGIC
+        SUPPRESS_LOGIC --> READ_BASELINE
+        READ_BASELINE --> BASELINE_CHECK
+        BASELINE_CHECK -- no rows / null --> BASELINE_NONE
+        BASELINE_CHECK -- found --> BASELINE_SET
+    end
+
+    BASELINE_NONE --> ANY_ROWS
+    BASELINE_SET --> ANY_ROWS
+
+    ANY_ROWS{Any candidate\nrows remaining?}
+    ANY_ROWS -- no --> END_NOTHING([End: nothing to send])
+    ANY_ROWS -- yes --> LOOP_START
+
+    subgraph LOOP["For Each Candidate Row"]
+        LOOP_START[["For each row in to_send\ncluster_id, cluster_name,\ncreator, projected_daily_dollars, signal"]]
+
+        FORMAT[Compute formatted_dollars\nformat_dollars projected]
+        PCT_CHECK{BASELINE_MEAN\npresent and > 0?}
+        PCT_CALC[formatted_percent =\npct above baseline]
+        PCT_UNKNOWN[formatted_percent = '?']
+        FORMAT --> PCT_CHECK
+        PCT_CHECK -- yes --> PCT_CALC
+        PCT_CHECK -- no --> PCT_UNKNOWN
+
+        LOOKUP["Slack API: users.lookupByEmail\ncreator email"]
+        LOOKUP_RESULT{user_id\nresolved?}
+        LOOKUP_NONE[creator_user_id = None]
+        LOOKUP_FOUND[creator_user_id = Slack user_id]
+        PCT_CALC --> LOOKUP
+        PCT_UNKNOWN --> LOOKUP
+        LOOKUP -- users_not_found\nor no email --> LOOKUP_NONE
+        LOOKUP -- ok --> LOOKUP_FOUND
+
+        ROUTE_CHECK{routing_mode?}
+        LOOKUP_NONE --> ROUTE_CHECK
+        LOOKUP_FOUND --> ROUTE_CHECK
+
+        ROUTE_CHANNEL[recipient = alert_channel\nrouting = 'channel_only']
+        DM_CHECK{user_id\nfound?}
+        ROUTE_DM[recipient = user_id\nrouting = 'dm']
+        ROUTE_FALLBACK[recipient = alert_channel\nrouting = 'fallback_channel']
+
+        ROUTE_CHECK -- channel_only --> ROUTE_CHANNEL
+        ROUTE_CHECK -- dm_with_fallback --> DM_CHECK
+        DM_CHECK -- yes --> ROUTE_DM
+        DM_CHECK -- no --> ROUTE_FALLBACK
+
+        BUILD_BLOCKS["Build Block Kit message\n---\nheader: severity + tier\nsection: cluster name, $/day, % above avg\nsection: right-size guidance\nactions: deep-link button to cluster\ncontext: footer attribution"]
+        ROUTE_CHANNEL --> BUILD_BLOCKS
+        ROUTE_DM --> BUILD_BLOCKS
+        ROUTE_FALLBACK --> BUILD_BLOCKS
+
+        POST["Slack API: chat.postMessage\nchannel = recipient\ntext = plain fallback\nblocks = Block Kit payload"]
+        APPEND_LOG["Append to in-memory send_log_rows\nsent_at, workspace_id, cluster_id,\nsignal, recipient, routing, message_ts"]
+        BUILD_BLOCKS --> POST
+        POST --> APPEND_LOG
+    end
+
+    APPEND_LOG --> NEXT_ROW{More rows?}
+    NEXT_ROW -- yes --> LOOP_START
+    NEXT_ROW -- no --> WRITE_LOG
+
+    WRITE_LOG["Write alert_send_log Delta table\nmode = append\nsend_log_rows DataFrame"]
+    WRITE_LOG --> END_DONE([End])

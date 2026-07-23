@@ -1,0 +1,15 @@
+cluster_id,expected_signal,notes
+c-normal-001,OK,m5.large x 2 — $11.52/day; log-z ~ -2.16
+c-budget-002,CRITICAL,r5d.24xlarge Photon x 12 — $14227/day > budget $5k
+c-zstat-003,WARNING,r5d.2xlarge Photon x 10 — $1003/day; log-z ~ 2.31
+c-zcrit-004,CRITICAL,r5d.2xlarge Photon x 30 — $2827/day; log-z ~ 3.34 (under budget)
+c-unknown-005,UNKNOWN,unobtanium.huge not in pricing fixture
+c-excluded-006,EXCLUDED,name matches prod-etl-* pattern
+c-fleet-007,OK,rd-fleet.2xlarge alias resolves to r5d.2xlarge rate
+c-photon-mismatch-008,OK,i3.4xlarge photon=true falls back to non-photon rate via _lookup_rates
+c-ok-photon-009,OK,r5d.2xlarge Photon x 2 — $273.60/day; log-z ~ 1.01
+c-warning-nonphoton-010,WARNING,r5d.24xlarge non-Photon x 4 — $1152/day; log-z ~ 2.45
+c-critical-nonphoton-z-011,CRITICAL,r5d.24xlarge non-Photon x 11 — $2765/day; log-z ~ 3.32 (under budget)
+c-critical-nonphoton-budget-012,CRITICAL,r5d.24xlarge non-Photon x 22 — $5299/day > budget $5k
+c-excluded-by-id-013,EXCLUDED,exact cluster_id in CLUSTER_IDS
+c-excluded-by-creator-014,EXCLUDED,creator service-bot@example.com in CREATORS

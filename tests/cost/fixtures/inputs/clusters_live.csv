@@ -1,0 +1,15 @@
+cluster_id,cluster_name,creator_user_name,cluster_source,runtime_engine,spark_version,node_type_id,driver_node_type_id,num_workers,photon
+c-normal-001,dev-jane-notebook,jane@example.com,UI,STANDARD,15.4.x-scala2.12,m5.large,m5.large,2,false
+c-budget-002,etl-blowup,bob@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.24xlarge,r5d.24xlarge,12,true
+c-zstat-003,ml-training-mid,carol@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.2xlarge,r5d.2xlarge,10,true
+c-zcrit-004,ml-training-huge,carol@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.2xlarge,r5d.2xlarge,30,true
+c-unknown-005,prototype-weird,dave@example.com,UI,STANDARD,15.4.x-scala2.12,unobtanium.huge,unobtanium.huge,1,false
+c-excluded-006,prod-etl-shared,service-prod@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.2xlarge,r5d.2xlarge,4,true
+c-fleet-007,fleet-sandbox,eve@example.com,UI,PHOTON,15.4.x-photon-scala2.12,rd-fleet.2xlarge,rd-fleet.2xlarge,2,true
+c-photon-mismatch-008,photon-on-cheap-node,frank@example.com,UI,PHOTON,15.4.x-photon-scala2.12,i3.4xlarge,i3.4xlarge,2,true
+c-ok-photon-009,dev-photon-small,grace@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.2xlarge,r5d.2xlarge,2,true
+c-warning-nonphoton-010,etl-medium,henry@example.com,UI,STANDARD,15.4.x-scala2.12,r5d.24xlarge,r5d.24xlarge,4,false
+c-critical-nonphoton-z-011,ml-eng-train,ivan@example.com,UI,STANDARD,15.4.x-scala2.12,r5d.24xlarge,r5d.24xlarge,11,false
+c-critical-nonphoton-budget-012,etl-runaway,judy@example.com,UI,STANDARD,15.4.x-scala2.12,r5d.24xlarge,r5d.24xlarge,22,false
+c-excluded-by-id-013,always-bad-cluster,kim@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.2xlarge,r5d.2xlarge,2,true
+c-excluded-by-creator-014,service-job-cluster,service-bot@example.com,UI,PHOTON,15.4.x-photon-scala2.12,r5d.2xlarge,r5d.2xlarge,2,true
