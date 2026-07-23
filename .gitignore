@@ -6,3 +6,7 @@ __pycache__/
 # Local exclusions may contain workspace identifiers, names, and principals.
 # Keep them out of Git; use config/excluded_clusters.example.py as the template.
 config/excluded_clusters.py
+
+# Customer-specific governance requirements (tag taxonomy, enabled asset types).
+# Copy config/governance_assets.py to config/governance_assets_local.py and edit.
+config/governance_assets_local.py

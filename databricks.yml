@@ -90,11 +90,13 @@ variables:
 include:
   - resources/*.yml
 
-# A local config/excluded_clusters.py is ignored by Git but included in bundle sync
-# when present. Otherwise notebooks fall back to excluded_clusters.example.py.
+# Local config overrides are ignored by Git but included in bundle sync when
+# present: config/excluded_clusters.py (falls back to excluded_clusters.example.py)
+# and config/governance_assets_local.py (falls back to governance_assets.py).
 sync:
   include:
     - config/excluded_clusters*.py
+    - config/governance_assets_local.py
 
 targets:
   dev:
