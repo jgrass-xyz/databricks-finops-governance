@@ -134,6 +134,49 @@ Tag, policy, and requirement changes follow the same snapshot behavior.
    Every schedule ships `PAUSED`. Validate each workflow, then explicitly enable
    only the schedules you intend to operate in `resources/*.yml` and redeploy.
 
+### Block-specific development deployment
+
+A deployment directly from a Databricks Git folder uses the generic bundle defaults,
+including the `main` catalog. For Block development, use the adjacent local overlay
+instead. It copies the Git-ignored Block configuration into the repository and passes
+Block's deployment variables to the bundle:
+
+```bash
+cd "/Users/jgrass/goose artifacts"
+
+git -C databricks-finops-governance switch feat/asset-owner-visibility
+git -C databricks-finops-governance pull
+
+./block-overlay/deploy.sh dev
+```
+
+The default development destination is:
+
+```text
+justin_grass.finops_observability_dev
+```
+
+The compact visibility outputs are:
+
+```text
+justin_grass.finops_observability_dev.visibility_service_principals_current
+justin_grass.finops_observability_dev.visibility_assets_current
+justin_grass.finops_observability_dev.visibility_asset_cost_daily
+```
+
+Override the destination or CLI profile without changing tracked bundle defaults:
+
+```bash
+CATALOG=another_catalog \
+SCHEMA=another_schema \
+DATABRICKS_CONFIG_PROFILE=another-profile \
+./block-overlay/deploy.sh dev
+```
+
+The Block overlay is intentionally stored outside this generic repository. Deploying
+only the Git folder does not include `block-overlay/governance_assets_local.py` and,
+unless `catalog` is overridden separately, writes to the generic `main` catalog.
+
 ## Config (DAB variables)
 
 | Variable | Default | Notes |
