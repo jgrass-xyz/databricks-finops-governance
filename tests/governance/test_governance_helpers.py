@@ -233,34 +233,45 @@ class GovernanceHelperTests(unittest.TestCase):
                     "display_name": "daily-loader", "active": False,
                 })
 
-        class ManagerAPI:
-            def get(self, service_principal_id):
-                return {"managers": [{"displayName": "platform@example.com"}]}
+        class AccessControlAPI:
+            def get_rule_set(self, name, etag):
+                self.request = (name, etag)
+                return {"grant_rules": [{
+                    "role": "roles/servicePrincipal.manager",
+                    "principals": ["users/u-1"],
+                }]}
+
+        class UserAPI:
+            def get(self, user_id):
+                return Object({"id": user_id, "user_name": "platform@example.com"})
 
         workspace = type("Workspace", (), {})()
         workspace.service_principals = PrincipalAPI([{"id": "sp-1"}])
-        account = type("Account", (), {"service_principal_manager": ManagerAPI()})()
-        rows = collect_service_principals(workspace, account)
+        account = type("Account", (), {
+            "access_control": AccessControlAPI(), "users": UserAPI(),
+        })()
+        rows = collect_service_principals(workspace, account, "acct-1")
         self.assertEqual("sp-1", rows[0]["service_principal_id"])
         self.assertFalse(rows[0]["active"])
-        self.assertEqual(["platform@example.com"], rows[0]["direct_owners"])
+        self.assertEqual([{"id": "u-1", "name": "platform@example.com", "type": "USER"}],
+                         rows[0]["direct_owners"])
         self.assertEqual("RESOLVED", rows[0]["owner_resolution_status"])
         self.assertEqual("sp-1", match_owner_to_principal("APP-123", rows)[
             "service_principal_id"])
 
     def test_manager_api_absence_degrades_visibly(self):
-        owners, status, error = resolve_direct_owners(object(), "sp-1")
+        owners, status, error = resolve_direct_owners(object(), "acct-1", "app-1")
         self.assertEqual([], owners)
         self.assertEqual("UNAVAILABLE", status)
-        self.assertIn("service_principal_manager", error)
+        self.assertIn("access_control", error)
 
     def test_manager_api_failure_is_visible_not_fatal(self):
-        class ManagerAPI:
-            def get(self, _principal_id):
+        class AccessControlAPI:
+            def get_rule_set(self, **_kwargs):
                 raise PermissionError("account admin required")
 
-        account = type("Account", (), {"service_principal_manager": ManagerAPI()})()
-        owners, status, error = resolve_direct_owners(account, "sp-1")
+        account = type("Account", (), {"access_control": AccessControlAPI()})()
+        owners, status, error = resolve_direct_owners(account, "acct-1", "app-1")
         self.assertEqual([], owners)
         self.assertEqual("ERROR", status)
         self.assertIn("PermissionError", error)

@@ -42,3 +42,4 @@ resources:
               catalog: ${var.catalog}
               schema: ${var.schema}
               billing_tag_key: ${var.visibility_billing_tag_key}
+              account_id: ${var.visibility_account_id}

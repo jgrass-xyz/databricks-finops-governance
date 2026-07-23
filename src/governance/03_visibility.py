@@ -17,10 +17,12 @@ from databricks.sdk import AccountClient, WorkspaceClient
 
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("schema", "finops_observability")
-dbutils.widgets.text("billing_tag_key", "cost_center")
+dbutils.widgets.text("billing_tag_key", "application")
+dbutils.widgets.text("account_id", "")
 
 CATALOG_SCHEMA = f"{dbutils.widgets.get('catalog')}.{dbutils.widgets.get('schema')}"
 BILLING_TAG_KEY = dbutils.widgets.get("billing_tag_key").strip()
+ACCOUNT_ID = dbutils.widgets.get("account_id").strip() or None
 if not BILLING_TAG_KEY:
     raise ValueError("billing_tag_key must not be empty")
 
@@ -38,15 +40,17 @@ w = WorkspaceClient()
 workspace_id = str(w.get_workspace_id())
 snapshot_ts = datetime.now(timezone.utc)
 
-# Account credentials and the manager API are not universal.  Collection still
-# succeeds and each principal carries an explicit UNAVAILABLE/ERROR status.
+# Account credentials and account access-control are not universal. Collection
+# still succeeds and each principal carries an explicit UNAVAILABLE/ERROR status.
 try:
     account_client = AccountClient()
+    account_id = ACCOUNT_ID or account_client.config.account_id
 except Exception as error:
     account_client = None
+    account_id = ACCOUNT_ID
     print(f"AccountClient unavailable; direct owners will be marked unavailable: {error}")
 
-principal_rows = collect_service_principals(w, account_client)
+principal_rows = collect_service_principals(w, account_client, account_id)
 for row in principal_rows:
     row.update({"workspace_id": workspace_id, "snapshot_ts": snapshot_ts})
 
@@ -60,7 +64,7 @@ CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.visibility_service_principals_curren
   application_id STRING,
   display_name STRING,
   active BOOLEAN NOT NULL,
-  direct_owners ARRAY<STRING> NOT NULL,
+  direct_owners ARRAY<STRUCT<id:STRING,name:STRING,type:STRING>> NOT NULL,
   owner_resolution_status STRING NOT NULL,
   owner_resolution_error STRING
 )
@@ -70,7 +74,8 @@ USING DELTA
 # Replace only after SDK collection completes. Empty is a valid current inventory.
 principal_schema = """
   service_principal_id STRING, application_id STRING, display_name STRING,
-  active BOOLEAN, direct_owners ARRAY<STRING>, owner_resolution_status STRING,
+  active BOOLEAN, direct_owners ARRAY<STRUCT<id:STRING,name:STRING,type:STRING>>,
+  owner_resolution_status STRING,
   owner_resolution_error STRING, workspace_id STRING, snapshot_ts TIMESTAMP
 """
 principal_df = spark.createDataFrame(principal_rows, schema=principal_schema)
@@ -100,7 +105,8 @@ WITH matched AS (
     a.owner,
     a.lifecycle_state,
     SORT_ARRAY(TRANSFORM(
-      MAP_ENTRIES(a.tags), tag -> NAMED_STRUCT('key', tag.key, 'value', tag.value)
+      MAP_ENTRIES(a.tags), tag -> NAMED_STRUCT(
+        'tag_name', tag.key, 'tag_value', tag.value)
     )) AS tags,
     p.service_principal_id AS owner_service_principal_id,
     p.application_id AS owner_service_principal_application_id,
@@ -125,29 +131,42 @@ SELECT * EXCEPT (match_number) FROM matched WHERE match_number = 1
 
 # COMMAND ----------
 
-# Aggregate before joining to avoid multiplying costs across usage units/pricing
-# sources. The left joins are intentional: a billed asset with no inventory or no
-# selected billing tag remains visible as BILLING_ONLY / NULL tag value.
+# Selected-tag rows retain their own dollars. A residual NULL-tag row is added when
+# only part of an asset/day's cost carried the selected tag, so summing this view
+# always reconciles to the asset-cost table without multiplying cost.
 spark.sql(f"""
 CREATE OR REPLACE VIEW {CATALOG_SCHEMA}.visibility_asset_cost_daily AS
 WITH cost AS (
   SELECT
     workspace_id, usage_date, product, asset_type, asset_id,
-    SUM(actual_daily_usage_quantity) AS actual_daily_usage_quantity,
-    SUM(actual_daily_dollars) AS actual_daily_dollars,
-    COLLECT_SET(usage_unit) AS usage_units,
+    SUM(actual_daily_dollars) AS asset_daily_dollars,
     COLLECT_SET(currency_code) AS currency_codes,
     COLLECT_SET(pricing_source) AS pricing_sources
   FROM {CATALOG_SCHEMA}.governance_silver_asset_cost_daily
   GROUP BY workspace_id, usage_date, product, asset_type, asset_id
-), selected_tag AS (
+), selected_tag_values AS (
   SELECT
     workspace_id, usage_date, product, asset_type, asset_id,
-    MAX(tag_value) AS billing_tag_value,
-    SUM(actual_daily_dollars) AS tagged_daily_dollars
+    tag_value AS billing_tag_value,
+    SUM(actual_daily_dollars) AS actual_daily_dollars
   FROM {CATALOG_SCHEMA}.governance_silver_asset_tag_cost_daily
   WHERE LOWER(tag_key) = LOWER('{quote(BILLING_TAG_KEY)}')
+  GROUP BY workspace_id, usage_date, product, asset_type, asset_id, tag_value
+), tagged_totals AS (
+  SELECT workspace_id, usage_date, product, asset_type, asset_id,
+         SUM(actual_daily_dollars) AS tagged_daily_dollars
+  FROM selected_tag_values
   GROUP BY workspace_id, usage_date, product, asset_type, asset_id
+), cost_by_tag AS (
+  SELECT c.*, t.billing_tag_value, t.actual_daily_dollars
+  FROM cost c JOIN selected_tag_values t USING (
+    workspace_id, usage_date, product, asset_type, asset_id)
+  UNION ALL
+  SELECT c.*, CAST(NULL AS STRING) AS billing_tag_value,
+         c.asset_daily_dollars - COALESCE(t.tagged_daily_dollars, 0) AS actual_daily_dollars
+  FROM cost c LEFT JOIN tagged_totals t USING (
+    workspace_id, usage_date, product, asset_type, asset_id)
+  WHERE c.asset_daily_dollars - COALESCE(t.tagged_daily_dollars, 0) > 0
 ), inventory_intervals AS (
   SELECT
     workspace_id, product, asset_type, asset_id, asset_name, owner, snapshot_date,
@@ -164,10 +183,8 @@ WITH cost AS (
   WHERE snapshot_number = 1
 ), joined AS (
   SELECT
-    c.*,
+    c.* EXCEPT (asset_daily_dollars),
     '{quote(BILLING_TAG_KEY)}' AS billing_tag_key,
-    t.billing_tag_value,
-    COALESCE(t.tagged_daily_dollars, 0) AS tagged_daily_dollars,
     CASE WHEN i.asset_id IS NULL THEN 'BILLING_ONLY' ELSE 'OBSERVED' END
       AS inventory_status,
     COALESCE(i.asset_name, c.asset_id) AS asset_name,
@@ -177,21 +194,17 @@ WITH cost AS (
     p.display_name AS owner_service_principal_name,
     p.active AS owner_service_principal_active,
     ROW_NUMBER() OVER (
-      PARTITION BY c.workspace_id, c.usage_date, c.asset_type, c.asset_id
+      PARTITION BY c.workspace_id, c.usage_date, c.asset_type, c.asset_id,
+                   c.billing_tag_value
       ORDER BY p.service_principal_id
     ) AS match_number
-  FROM cost c
+  FROM cost_by_tag c
   LEFT JOIN inventory_intervals i
     ON i.workspace_id = c.workspace_id
    AND i.asset_type = c.asset_type
    AND i.asset_id = c.asset_id
    AND c.usage_date >= i.snapshot_date
    AND c.usage_date < i.next_snapshot_date
-  LEFT JOIN selected_tag t
-    ON t.workspace_id = c.workspace_id
-   AND t.usage_date = c.usage_date
-   AND t.asset_type = c.asset_type
-   AND t.asset_id = c.asset_id
   LEFT JOIN {CATALOG_SCHEMA}.visibility_service_principals_current p
     ON p.workspace_id = c.workspace_id
    AND LOWER(TRIM(i.owner)) IN (

@@ -37,7 +37,10 @@ variables:
     default: "365"
   visibility_billing_tag_key:
     description: Billing custom-tag key selected in the compact historical visibility output.
-    default: cost_center
+    default: application
+  visibility_account_id:
+    description: Optional Databricks account ID used to resolve direct service-principal managers.
+    default: ""
   notifications_email:
     description: Email to CC on job failures. Leave empty to disable.
     default: ""
