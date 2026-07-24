@@ -2,8 +2,8 @@
 # MAGIC %md
 # MAGIC # Compact asset visibility
 # MAGIC
-# MAGIC Publishes three deliberately policy-free outputs on top of the existing
-# MAGIC governance collectors/resolvers: current service principals, current
+# MAGIC Publishes three compact outputs on top of the governance collectors and
+# MAGIC resolvers: current service principals, current
 # MAGIC configured assets, and historical daily configured-asset cost.
 
 # COMMAND ----------
@@ -112,8 +112,8 @@ spark.sql(f"DELETE FROM {CATALOG_SCHEMA}.visibility_service_principals_current")
 
 # COMMAND ----------
 
-# Current configured assets only: policies and requirement status intentionally do
-# not leak into this compact visibility contract. Billing-only rows belong in the
+# Current configured assets only: requirement status intentionally does not leak
+# into this compact visibility contract. Billing-only rows belong in the
 # cost output, not in a list claiming to represent currently configured assets.
 spark.sql(f"""
 CREATE OR REPLACE VIEW {CATALOG_SCHEMA}.visibility_assets_current AS

@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_requirement_snapsh
   collector STRING NOT NULL,
   cost_resolver STRING NOT NULL,
   required_tags ARRAY<STRING> NOT NULL,
-  required_policies ARRAY<STRING> NOT NULL,
   config_hash STRING NOT NULL,
   raw_config STRING NOT NULL
 )
@@ -66,11 +65,9 @@ CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_asset_inventory_sn
   owner STRING,
   lifecycle_state STRING,
   tags MAP<STRING, STRING> NOT NULL,
-  policies ARRAY<STRUCT<policy_type:STRING, policy_id:STRING, policy_name:STRING>> NOT NULL,
   discovery_source STRING,
   api_enriched BOOLEAN,
   tag_observation_complete BOOLEAN,
-  policy_observation_complete BOOLEAN,
   raw_payload STRING
 )
 USING DELTA
@@ -87,42 +84,6 @@ CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_asset_tag_snapshot
   asset_id STRING NOT NULL,
   tag_key STRING NOT NULL,
   tag_value STRING NOT NULL
-)
-USING DELTA
-PARTITIONED BY (snapshot_date)
-""")
-
-spark.sql(f"""
-CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_policy_snapshot (
-  workspace_id STRING NOT NULL,
-  collection_run_id STRING NOT NULL,
-  snapshot_ts TIMESTAMP NOT NULL,
-  snapshot_date DATE GENERATED ALWAYS AS (CAST(snapshot_ts AS DATE)),
-  policy_type STRING NOT NULL,
-  policy_id STRING NOT NULL,
-  policy_name STRING,
-  description STRING,
-  definition_json STRING,
-  policy_family_id STRING,
-  raw_payload STRING
-)
-USING DELTA
-PARTITIONED BY (snapshot_date)
-""")
-
-spark.sql(f"""
-CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_policy_term_snapshot (
-  workspace_id STRING NOT NULL,
-  collection_run_id STRING NOT NULL,
-  snapshot_ts TIMESTAMP NOT NULL,
-  snapshot_date DATE GENERATED ALWAYS AS (CAST(snapshot_ts AS DATE)),
-  policy_type STRING NOT NULL,
-  policy_id STRING NOT NULL,
-  definition_path STRING NOT NULL,
-  rule_type STRING NOT NULL,
-  rule_json STRING NOT NULL,
-  hidden BOOLEAN NOT NULL,
-  is_optional BOOLEAN NOT NULL
 )
 USING DELTA
 PARTITIONED BY (snapshot_date)
@@ -188,56 +149,34 @@ WITH observed AS (
   SELECT
     a.*,
     r.required_tags,
-    r.required_policies,
     r.config_hash,
     TRANSFORM(
       MAP_KEYS(MAP_FILTER(a.tags, (key, value) -> value IS NOT NULL AND TRIM(value) != '')),
       key -> LOWER(key)
-    ) AS observed_tag_keys,
-    TRANSFORM(a.policies, policy -> policy.policy_type) AS observed_policy_types
+    ) AS observed_tag_keys
   FROM {CATALOG_SCHEMA}.governance_silver_asset_inventory_snapshot a
   JOIN {CATALOG_SCHEMA}.governance_silver_requirement_snapshot r
     ON r.workspace_id = a.workspace_id
    AND r.collection_run_id = a.collection_run_id
    AND r.asset_type = a.asset_type
 ), evaluated AS (
-  SELECT
-    *,
+  SELECT *,
     FILTER(required_tags, required -> NOT ARRAY_CONTAINS(observed_tag_keys, LOWER(required)))
-      AS evaluated_missing_required_tags,
-    FILTER(required_policies, required -> NOT ARRAY_CONTAINS(observed_policy_types, UPPER(required)))
-      AS evaluated_missing_required_policies
+      AS evaluated_missing_required_tags
   FROM observed
 )
 SELECT
-  * EXCEPT (
-    observed_tag_keys, observed_policy_types,
-    evaluated_missing_required_tags, evaluated_missing_required_policies
-  ),
-  CASE
-    WHEN COALESCE(tag_observation_complete, FALSE)
-      THEN evaluated_missing_required_tags
-    ELSE CAST(NULL AS ARRAY<STRING>)
+  * EXCEPT (observed_tag_keys, evaluated_missing_required_tags),
+  CASE WHEN COALESCE(tag_observation_complete, FALSE)
+    THEN evaluated_missing_required_tags ELSE CAST(NULL AS ARRAY<STRING>)
   END AS missing_required_tags,
-  CASE
-    WHEN COALESCE(policy_observation_complete, FALSE)
-      THEN evaluated_missing_required_policies
-    ELSE CAST(NULL AS ARRAY<STRING>)
-  END AS missing_required_policies,
   CASE
     WHEN SIZE(required_tags) = 0 THEN 'NOT_CONFIGURED'
     WHEN NOT COALESCE(tag_observation_complete, FALSE) THEN 'UNKNOWN'
     WHEN SIZE(evaluated_missing_required_tags) = 0 THEN 'APPLIED'
     WHEN SIZE(evaluated_missing_required_tags) < SIZE(required_tags) THEN 'PARTIAL'
     ELSE 'NOT_APPLIED'
-  END AS tag_status,
-  CASE
-    WHEN SIZE(required_policies) = 0 THEN 'NOT_CONFIGURED'
-    WHEN NOT COALESCE(policy_observation_complete, FALSE) THEN 'UNKNOWN'
-    WHEN SIZE(evaluated_missing_required_policies) = 0 THEN 'APPLIED'
-    WHEN SIZE(evaluated_missing_required_policies) < SIZE(required_policies) THEN 'PARTIAL'
-    ELSE 'NOT_APPLIED'
-  END AS policy_status
+  END AS tag_status
 FROM evaluated
 """)
 
@@ -329,20 +268,14 @@ WITH latest_success AS (
     CAST(NULL AS STRING) AS owner,
     'BILLING_ONLY' AS lifecycle_state,
     CAST(MAP() AS MAP<STRING, STRING>) AS tags,
-    CAST(ARRAY() AS ARRAY<STRUCT<policy_type:STRING, policy_id:STRING, policy_name:STRING>>)
-      AS policies,
     'BILLING' AS discovery_source,
     FALSE AS api_enriched,
     FALSE AS tag_observation_complete,
-    FALSE AS policy_observation_complete,
     CAST(NULL AS STRING) AS raw_payload,
     r.required_tags,
-    r.required_policies,
     r.config_hash,
     CAST(NULL AS ARRAY<STRING>) AS missing_required_tags,
-    CAST(NULL AS ARRAY<STRING>) AS missing_required_policies,
     'UNKNOWN' AS tag_status,
-    'UNKNOWN' AS policy_status,
     'BILLING_ONLY' AS inventory_status,
     c.current_day_dollars,
     c.previous_day_dollars,
@@ -378,7 +311,6 @@ SELECT
   h.product,
   h.asset_type,
   h.tag_status,
-  h.policy_status,
   COUNT(*) AS asset_count,
   COALESCE(SUM(c.actual_daily_dollars), 0) AS actual_daily_dollars
 FROM {CATALOG_SCHEMA}.governance_gold_asset_history h
@@ -451,36 +383,15 @@ SELECT * FROM {CATALOG_SCHEMA}.governance_silver_requirement_snapshot
 """)
 
 spark.sql(f"""
-CREATE OR REPLACE VIEW {CATALOG_SCHEMA}.governance_gold_observed_tags_policies_current AS
-WITH current_assets AS (
-  SELECT * FROM {CATALOG_SCHEMA}.governance_gold_asset_current
-), values AS (
-  SELECT
-    workspace_id, product, asset_type, asset_id,
-    'TAG' AS governance_kind,
-    tag_key AS governance_type,
-    tag_value AS governance_id,
-    CAST(NULL AS STRING) AS governance_name,
-    trailing_30d_dollars
-  FROM current_assets
-  LATERAL VIEW EXPLODE(tags) tags_view AS tag_key, tag_value
-  UNION ALL
-  SELECT
-    workspace_id, product, asset_type, asset_id,
-    'POLICY' AS governance_kind,
-    policy.policy_type AS governance_type,
-    policy.policy_id AS governance_id,
-    policy.policy_name AS governance_name,
-    trailing_30d_dollars
-  FROM current_assets
-  LATERAL VIEW EXPLODE(policies) policies_view AS policy
-)
+CREATE OR REPLACE VIEW {CATALOG_SCHEMA}.governance_gold_observed_tags_current AS
 SELECT
-  workspace_id, product, asset_type, governance_kind,
-  governance_type, governance_id, governance_name,
+  workspace_id, product, asset_type,
+  tag_key AS tag_name,
+  tag_value,
   COUNT(DISTINCT asset_id) AS asset_count,
   SUM(trailing_30d_dollars) AS trailing_30d_dollars
-FROM values
+FROM {CATALOG_SCHEMA}.governance_gold_asset_current
+LATERAL VIEW EXPLODE(tags) tags_view AS tag_key, tag_value
 GROUP BY ALL
 """)
 

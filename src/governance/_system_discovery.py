@@ -15,7 +15,7 @@ def _literal(value):
 
 def _cluster_sql(workspace_id):
     return f"""
-      SELECT cluster_id, cluster_name, owned_by, tags, cluster_source, policy_id,
+      SELECT cluster_id, cluster_name, owned_by, tags, cluster_source,
              create_time, delete_time, change_time
       FROM system.compute.clusters
       WHERE workspace_id = '{_literal(workspace_id)}'
@@ -84,13 +84,6 @@ def discover_clusters(spark, context):
     assets = []
     for row in spark.sql(_cluster_sql(context["workspace_id"])).collect():
         value = row.asDict(recursive=True)
-        policies = []
-        if value.get("policy_id"):
-            policies.append({
-                "policy_type": "COMPUTE_POLICY",
-                "policy_id": str(value["policy_id"]),
-                "policy_name": None,
-            })
         assets.append(asset_record(
             **context,
             asset_id=value["cluster_id"],
@@ -98,11 +91,9 @@ def discover_clusters(spark, context):
             owner=value.get("owned_by"),
             lifecycle_state="ACTIVE",
             tags=value.get("tags"),
-            policies=policies,
             discovery_source="SYSTEM_TABLE",
             api_enriched=False,
             tag_observation_complete=True,
-            policy_observation_complete=True,
             raw_payload=_raw(value),
         ))
     return assets
@@ -119,11 +110,9 @@ def discover_jobs(spark, context):
             owner=value.get("owner"),
             lifecycle_state="PAUSED" if value.get("paused") else "ACTIVE",
             tags=value.get("tags"),
-            policies=[],
             discovery_source="SYSTEM_TABLE",
             api_enriched=False,
             tag_observation_complete=True,
-            policy_observation_complete=False,
             raw_payload=_raw(value),
         ))
     return assets
@@ -140,11 +129,9 @@ def discover_serving_endpoints(spark, context):
             owner=value.get("created_by"),
             lifecycle_state="ACTIVE",
             tags={},
-            policies=[],
             discovery_source="SYSTEM_TABLE",
             api_enriched=False,
             tag_observation_complete=False,
-            policy_observation_complete=False,
             raw_payload=_raw(value),
         ))
     return assets
@@ -161,12 +148,9 @@ def discover_warehouses(spark, context):
             owner=value.get("created_by"),
             lifecycle_state="ACTIVE",
             tags=value.get("tags"),
-            policies=[],
             discovery_source="SYSTEM_TABLE",
             api_enriched=False,
             tag_observation_complete=True,
-            # SQL warehouses expose no policy attachment; nothing to observe.
-            policy_observation_complete=True,
             raw_payload=_raw(value),
         ))
     return assets

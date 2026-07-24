@@ -12,7 +12,6 @@ sys.path.insert(0, GOVERNANCE_SRC)
 
 from _collectors import COST_RESOLVERS, collect_clusters, collect_jobs, collect_serving_endpoints, collect_warehouses
 from _normalize import evaluate_requirements, merge_discovery_and_enrichment
-from _policy_terms import flatten_policy_terms, merge_policy_definitions
 from _system_discovery import _cluster_sql, _job_sql, _serving_endpoint_sql, _warehouse_sql
 from _visibility import collect_service_principals, match_owner_to_principal, resolve_direct_owners
 
@@ -58,86 +57,53 @@ CONTEXT = {
 
 class GovernanceHelperTests(unittest.TestCase):
     def test_discovery_mode_keeps_observations_without_enforcement(self):
-        result = evaluate_requirements(
-            {"team": "analytics"},
-            [{"policy_type": "COMPUTE_POLICY", "policy_id": "p1"}],
-            [],
-            [],
-        )
+        result = evaluate_requirements({"team": "analytics"}, [])
         self.assertEqual("NOT_CONFIGURED", result["tag_status"])
-        self.assertEqual("NOT_CONFIGURED", result["policy_status"])
         self.assertEqual([], result["missing_required_tags"])
-        self.assertEqual([], result["missing_required_policies"])
 
     def test_changed_requirements_change_only_the_new_evaluation(self):
         observed_tags = {"cost_center": "42"}
-        old = evaluate_requirements(observed_tags, [], ["cost_center"], [])
-        new = evaluate_requirements(observed_tags, [], ["cost_center", "owner"], [])
+        old = evaluate_requirements(observed_tags, ["cost_center"])
+        new = evaluate_requirements(observed_tags, ["cost_center", "owner"])
         self.assertEqual("APPLIED", old["tag_status"])
         self.assertEqual("PARTIAL", new["tag_status"])
         self.assertEqual(["owner"], new["missing_required_tags"])
 
-    def test_removed_policy_is_missing_in_next_snapshot(self):
-        applied = evaluate_requirements(
-            {}, [{"policy_type": "BUDGET_POLICY", "policy_id": "b1"}],
-            [], ["BUDGET_POLICY"])
-        removed = evaluate_requirements({}, [], [], ["BUDGET_POLICY"])
-        self.assertEqual("APPLIED", applied["policy_status"])
-        self.assertEqual("NOT_APPLIED", removed["policy_status"])
-        self.assertEqual(["BUDGET_POLICY"], removed["missing_required_policies"])
-
     def test_incomplete_api_enrichment_is_unknown_not_unapplied(self):
         result = evaluate_requirements(
-            {}, [], ["owner"], ["BUDGET_POLICY"],
-            tag_observation_complete=False,
-            policy_observation_complete=False,
-        )
+            {}, ["owner"], tag_observation_complete=False)
         self.assertEqual("UNKNOWN", result["tag_status"])
-        self.assertEqual("UNKNOWN", result["policy_status"])
         self.assertIsNone(result["missing_required_tags"])
-        self.assertIsNone(result["missing_required_policies"])
 
     def test_cluster_collector(self):
         rows = collect_clusters(Client(clusters=[{
             "cluster_id": "c1", "cluster_name": "analytics",
             "creator_user_name": "owner@example.com", "cluster_source": "UI",
-            "state": "RUNNING", "policy_id": "p1",
-            "custom_tags": {"cost_center": "42"},
+            "state": "RUNNING", "custom_tags": {"cost_center": "42"},
         }]), {**CONTEXT, "product": "COMPUTE", "asset_type": "cluster"})
         self.assertEqual(1, len(rows))
         self.assertEqual("c1", rows[0]["asset_id"])
-        self.assertEqual("COMPUTE_POLICY", rows[0]["policies"][0]["policy_type"])
+        self.assertNotIn("policies", rows[0])
 
-    def test_job_collector_collects_multiple_policy_types(self):
+    def test_job_collector_prefers_run_as_owner(self):
         rows = collect_jobs(Client(jobs=[{
-            "job_id": 7,
-            "creator_user_name": "creator@example.com",
+            "job_id": 7, "creator_user_name": "creator@example.com",
             "run_as_user_name": "principal@example.com",
-            "effective_budget_policy_id": "budget-1",
-            "settings": {
-                "name": "daily-load",
-                "tags": {"product": "billing"},
-                "job_clusters": [{"new_cluster": {"policy_id": "compute-1"}}],
-            },
+            "settings": {"name": "daily-load", "tags": {"product": "billing"}},
         }]), {**CONTEXT, "product": "WORKFLOWS", "asset_type": "job"})
         self.assertEqual("principal@example.com", rows[0]["owner"])
-        self.assertEqual(
-            ["BUDGET_POLICY", "COMPUTE_POLICY"],
-            [policy["policy_type"] for policy in rows[0]["policies"]],
-        )
+        self.assertNotIn("policies", rows[0])
 
     def test_serving_endpoint_collector(self):
         rows = collect_serving_endpoints(Client(endpoints=[{
-            "id": "internal-id",
-            "name": "fraud-model",
+            "id": "internal-id", "name": "fraud-model",
             "creator": "owner@example.com",
-            "budget_policy_id": "budget-2",
             "tags": [{"key": "product", "value": "fraud"}],
             "state": {"ready": "READY"},
         }]), {**CONTEXT, "product": "MODEL_SERVING", "asset_type": "serving_endpoint"})
         self.assertEqual("fraud-model", rows[0]["asset_id"])
         self.assertEqual({"product": "fraud"}, rows[0]["tags"])
-        self.assertEqual("BUDGET_POLICY", rows[0]["policies"][0]["policy_type"])
+        self.assertNotIn("policies", rows[0])
 
     def test_demo_config_enables_all_shipped_adapters(self):
         config = runpy.run_path(os.path.join(ROOT, "config", "governance_assets.py"))[
@@ -147,47 +113,27 @@ class GovernanceHelperTests(unittest.TestCase):
             {key for key, value in config.items() if value["enabled"]},
         )
 
-    def test_policy_terms_preserve_rule_json(self):
-        terms = flatten_policy_terms(json.dumps({
-            "spark_version": {"type": "fixed", "value": "auto:latest-lts", "hidden": True},
-            "num_workers": {"type": "range", "maxValue": 10},
-        }))
-        self.assertEqual(2, len(terms))
-        self.assertEqual("range", terms[0]["rule_type"])
-        self.assertEqual("fixed", terms[1]["rule_type"])
-        self.assertTrue(terms[1]["hidden"])
-
-    def test_policy_family_overrides_replace_inherited_rule(self):
-        merged = merge_policy_definitions(
-            {"num_workers": {"type": "range", "maxValue": 20}},
-            {"num_workers": {"type": "range", "maxValue": 5}},
-        )
-        self.assertEqual(5, merged["num_workers"]["maxValue"])
-
     def test_system_discovery_is_primary_and_api_enriches(self):
         system = [{
             "asset_type": "job", "asset_id": "7", "asset_name": "daily",
             "owner": "owner@example.com", "lifecycle_state": "ACTIVE",
-            "tags": {"team": "finance"}, "policies": [],
+            "tags": {"team": "finance"},
             "discovery_source": "SYSTEM_TABLE", "api_enriched": False,
             "tag_observation_complete": True,
-            "policy_observation_complete": False,
             "raw_payload": "system",
         }]
         api = [{
             "asset_type": "job", "asset_id": "7", "asset_name": "daily",
             "owner": "owner@example.com", "lifecycle_state": "PAUSED",
             "tags": {"product": "ledger"},
-            "policies": [{"policy_type": "BUDGET_POLICY", "policy_id": "b1"}],
             "raw_payload": "api",
         }]
         merged = merge_discovery_and_enrichment(system, api)
         self.assertEqual(1, len(merged))
         self.assertEqual("SYSTEM_TABLE", merged[0]["discovery_source"])
         self.assertTrue(merged[0]["api_enriched"])
-        self.assertTrue(merged[0]["policy_observation_complete"])
         self.assertEqual({"team": "finance", "product": "ledger"}, merged[0]["tags"])
-        self.assertEqual("BUDGET_POLICY", merged[0]["policies"][0]["policy_type"])
+        self.assertNotIn("policies", merged[0])
 
     def test_warehouse_collector_normalizes_api_tag_shape(self):
         client = Client(warehouses=[{
@@ -204,7 +150,7 @@ class GovernanceHelperTests(unittest.TestCase):
         self.assertEqual(1, len(rows))
         self.assertEqual("abc123", rows[0]["asset_id"])
         self.assertEqual({"application": "bi"}, rows[0]["tags"])
-        self.assertEqual([], rows[0]["policies"])
+        self.assertNotIn("policies", rows[0])
 
     def test_warehouse_cost_resolver_scopes_to_sql_product(self):
         resolver = COST_RESOLVERS["warehouse"]

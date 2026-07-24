@@ -50,7 +50,7 @@ snapshot_date = snapshot_ts.date().isoformat()
 # COMMAND ----------
 
 # System tables establish the complete asset universe. Workspace APIs are optional
-# enrichment: permission gaps may reduce policy/live-state coverage but never remove
+# enrichment: permission gaps may reduce tag/live-state coverage but never remove
 # assets or their cost from the model.
 asset_rows = []
 run_rows = []
@@ -68,7 +68,6 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
         "collector": config["collector"],
         "cost_resolver": config["cost_resolver"],
         "required_tags": [str(v).strip().casefold() for v in config.get("required_tags", [])],
-        "required_policies": [],
         "config_hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         "raw_config": canonical,
     })
@@ -94,11 +93,6 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
             enrichment_error = f"API enrichment failed: {type(error).__name__}: {error}"
             print(enrichment_error)
     collected = merge_discovery_and_enrichment(discovered, enriched)
-    # Policy attachment and definition collection are outside this pipeline's scope.
-    # Keep compatibility columns empty until the schema is deliberately simplified.
-    for asset in collected:
-        asset["policies"] = []
-        asset["policy_observation_complete"] = False
     asset_rows.extend(collected)
     run_rows.append({
         "workspace_id": workspace_id,
@@ -154,16 +148,15 @@ schemas = {
     "governance_silver_requirement_snapshot": """
       workspace_id STRING, collection_run_id STRING, snapshot_ts TIMESTAMP,
       product STRING, asset_type STRING, enabled BOOLEAN, collector STRING,
-      cost_resolver STRING, required_tags ARRAY<STRING>, required_policies ARRAY<STRING>,
+      cost_resolver STRING, required_tags ARRAY<STRING>,
       config_hash STRING, raw_config STRING
     """,
     "governance_silver_asset_inventory_snapshot": """
       workspace_id STRING, collection_run_id STRING, snapshot_ts TIMESTAMP,
       product STRING, asset_type STRING, asset_id STRING, asset_name STRING,
       owner STRING, lifecycle_state STRING, tags MAP<STRING, STRING>,
-      policies ARRAY<STRUCT<policy_type:STRING, policy_id:STRING, policy_name:STRING>>,
       discovery_source STRING, api_enriched BOOLEAN,
-      tag_observation_complete BOOLEAN, policy_observation_complete BOOLEAN,
+      tag_observation_complete BOOLEAN,
       raw_payload STRING
     """,
     "governance_silver_asset_tag_snapshot": """

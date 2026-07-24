@@ -14,7 +14,6 @@ ASSET_TYPES = {
         "required_tags": [
             "cost_center", "business_unit", "product", "environment", "owner",
         ],
-        "required_policies": ["COMPUTE_POLICY"],
     },
     "job": {
         "enabled": True,
@@ -22,7 +21,6 @@ ASSET_TYPES = {
         "collector": "jobs",
         "cost_resolver": "job",
         "required_tags": ["cost_center", "product", "owner"],
-        "required_policies": ["BUDGET_POLICY"],
     },
     "serving_endpoint": {
         "enabled": True,
@@ -30,7 +28,6 @@ ASSET_TYPES = {
         "collector": "serving_endpoints",
         "cost_resolver": "serving_endpoint",
         "required_tags": ["cost_center", "product", "owner"],
-        "required_policies": ["BUDGET_POLICY"],
     },
     "warehouse": {
         "enabled": True,
@@ -38,7 +35,5 @@ ASSET_TYPES = {
         "collector": "warehouses",
         "cost_resolver": "warehouse",
         "required_tags": ["cost_center", "product", "owner"],
-        # SQL warehouses expose no policy attachment surface; discovery mode.
-        "required_policies": [],
     },
 }

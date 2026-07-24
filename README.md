@@ -1,7 +1,7 @@
 # databricks-finops-governance
 
 Databricks FinOps and asset-governance toolkit. It combines system-table cost
-attribution, tag and policy coverage, historical asset inventory, billing
+attribution, tag coverage, historical asset inventory, billing
 reconciliation, classic-compute anomaly detection, and optional Slack alerting.
 The governance adapters currently cover classic clusters, jobs, Model
 Serving endpoints, and SQL warehouses.
@@ -22,8 +22,7 @@ Under `${catalog}.${schema}` (defaults `main.finops_observability`):
 | `event_log` | Append-only audit of routing events across every detector silo. Cost router filters on `detector_name='cluster_cost'` for its per-(cluster, severity) suppression. |
 | `backtest_results` | Output of the backtest notebook — one row per historical bad cluster-day with outcome & lead time. |
 | `governance_silver_requirement_snapshot` | Requirements active for each collection run, including their configuration hash. |
-| `governance_silver_asset_inventory_snapshot` / `governance_silver_asset_tag_snapshot` | Daily asset, owner, tag, and attached-policy observations. |
-| `governance_silver_policy_snapshot` / `governance_silver_policy_term_snapshot` | Daily observed policy definitions and dashboard-friendly policy terms. |
+| `governance_silver_asset_inventory_snapshot` / `governance_silver_asset_tag_snapshot` | Daily asset, owner, and tag observations. |
 | `governance_silver_asset_cost_daily` / `governance_silver_asset_tag_cost_daily` | Persisted daily asset and tag cost rollups behind the governance views. |
 
 ## Jobs
@@ -40,34 +39,33 @@ Under `${catalog}.${schema}` (defaults `main.finops_observability`):
 ## Asset governance views
 
 The governance module currently enables classic clusters, jobs, serving
-endpoints, and SQL warehouses in `config/governance_assets.py`. Its Silver inventory, requirement,
-policy, and cost snapshots are Delta tables; its Gold dashboard objects are
+endpoints, and SQL warehouses in `config/governance_assets.py`. Its Silver inventory, requirement, and cost snapshots are Delta tables; its Gold dashboard objects are
 regular views:
 
 System tables provide the authoritative asset inventory and billing spine. The
-workspace APIs only enrich assets with live state, tags, and policy information
+workspace APIs only enrich assets with live state and tag information
 they are permitted to return. API visibility never determines whether an asset
 or its cost appears in Gold.
 
 | View | Purpose |
 |---|---|
-| `governance_gold_asset_current` | Latest owner, tags, policies, missing requirements, status, and cost per active asset. |
+| `governance_gold_asset_current` | Latest owner, tags, missing requirements, status, and cost per active asset. |
 | `governance_gold_asset_history` | Historical asset observations evaluated against the requirements from the same collection run. |
-| `governance_gold_asset_daily` | Daily asset counts and dollars grouped by tag and policy status. |
+| `governance_gold_asset_daily` | Daily asset counts and dollars grouped by tag status. |
 | `governance_gold_cost_coverage_daily` | Billed, inventory-matched, and billing-only assets/dollars with coverage percentages. |
 | `governance_gold_config_history` | Requirement/configuration history across collection runs. |
-| `governance_gold_observed_tags_policies_current` | Current observed tag values and policy IDs with asset counts and trailing cost. |
+| `governance_gold_observed_tags_current` | Current observed tag values with asset counts and trailing cost. |
 
 ### Compact asset visibility outputs
 
-The final `visibility` task is an isolated, policy-free presentation layer. It
+The final `visibility` task is a compact presentation layer. It
 reuses the governance inventory and billing rollups rather than changing their
 contracts:
 
 | Output | Purpose |
 |---|---|
 | `visibility_service_principals_current` | Current workspace service principals (SDK only): principal/application IDs, display name, active state, direct owners, and explicit owner-resolution status/error. |
-| `visibility_assets_current` | Current configured assets with `ARRAY<STRUCT<key,value>>` tags and a direct owner-to-service-principal match by principal ID, application ID, or display name. |
+| `visibility_assets_current` | Current configured assets with `ARRAY<STRUCT<tag_name,tag_value>>` tags and a direct owner-to-service-principal match by principal ID, application ID, or display name. |
 | `visibility_asset_cost_daily` | Historical daily configured-asset costs, selected billing tag, inventory status, and owner/service-principal identity. Billing-only and missing-tag rows are retained. |
 
 Set `visibility_billing_tag_key` (default `application`) to choose the custom
@@ -86,16 +84,25 @@ call for every unrelated workspace principal. `owner_resolution_status` is
 `owner_resolution_error`. Empty `direct_owners` must therefore not be interpreted
 as proof that no owner exists.
 
-Empty `required_tags` or `required_policies` arrays put that dimension in discovery
-mode (`NOT_CONFIGURED`) without hiding observed values. Metadata that cannot be
-observed without API enrichment is `UNKNOWN`, not incorrectly `NOT_APPLIED`.
+Empty `required_tags` arrays put tag enforcement in discovery mode (`NOT_CONFIGURED`)
+without hiding observed values. Metadata that cannot be observed without API enrichment
+is `UNKNOWN`, not incorrectly `NOT_APPLIED`.
 Recently billed assets missing from current inventory remain in the current view as
 `BILLING_ONLY` for 30 days with their full cost. Deleted assets remain in history.
-Tag, policy, and requirement changes follow the same snapshot behavior.
+Tag and requirement changes follow the same snapshot behavior.
 
 `governance_gold_asset_current` exposes `current_day_dollars` (partial),
 `previous_day_dollars` (completed), and completed trailing 7/30/90-day windows.
 `actual_daily_dollars` remains as a compatibility alias for `previous_day_dollars`.
+
+### Destructive governance reset
+
+`src/governance/99_cleanup.py` is a manual cleanup notebook and is intentionally
+not part of any job. Run it before the refresh when accepting a full rebuild after
+a breaking schema change. Set `catalog`, `schema`, and the exact confirmation value
+`DROP <catalog>.<schema>`; it drops governance/visibility views first and then their
+tables while retaining the schema. The next `asset_governance_refresh` recreates the
+current contract and rebuilds cost history according to the configured backfill.
 
 ## Deploying to a new workspace
 
@@ -299,7 +306,7 @@ databricks-finops-governance/
 │   └── pricing_GCP.json
 ├── src/
 │   ├── cost/                    # real-time detector, routing, backtest, and teardown
-│   └── governance/              # daily inventory, policy, and cost-attribution module
+│   └── governance/              # daily inventory, tags, and cost-attribution module
 ├── tests/
 │   ├── cost/
 │   └── governance/
