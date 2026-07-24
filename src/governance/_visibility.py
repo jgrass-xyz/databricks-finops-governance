@@ -83,7 +83,11 @@ def collect_service_principals(
     Supplying owner values avoids an account API call per unrelated principal.
     """
     principal_api = workspace_client.service_principals
-    listed_principals = list(principal_api.list())
+    # The SDK defaults to count=10,000, which can make a large workspace SCIM
+    # response exceed the HTTP read timeout. Request only the fields we publish
+    # and paginate in bounded responses.
+    listed_principals = list(principal_api.list(
+        attributes="id,applicationId,displayName,active", count=100))
     owner_keys = (
         None if asset_owners is None else
         {str(value).strip().casefold() for value in asset_owners if str(value).strip()}

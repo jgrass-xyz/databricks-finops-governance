@@ -29,8 +29,10 @@ class Object:
 class API:
     def __init__(self, values):
         self.values = values
+        self.list_kwargs = None
 
-    def list(self, **_kwargs):
+    def list(self, **kwargs):
+        self.list_kwargs = kwargs
         return iter(Object(value) for value in self.values)
 
 
@@ -255,6 +257,8 @@ class GovernanceHelperTests(unittest.TestCase):
         })()
         rows = collect_service_principals(workspace, account, "acct-1")
         self.assertEqual("sp-1", rows[0]["service_principal_id"])
+        self.assertEqual(100, workspace.service_principals.list_kwargs["count"])
+        self.assertIn("applicationId", workspace.service_principals.list_kwargs["attributes"])
         self.assertFalse(rows[0]["active"])
         self.assertEqual([{"id": "u-1", "name": "platform@example.com", "type": "USER"}],
                          rows[0]["direct_owners"])
