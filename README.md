@@ -98,6 +98,12 @@ Tag and requirement changes follow the same snapshot behavior.
 
 ### Destructive governance reset
 
+For schemas created before policy collection was retired, run
+`src/governance/00_migrate_remove_policy_columns.py` once before the first refresh.
+This idempotent migration removes the legacy `required_policies`, `policies`, and
+`policy_observation_complete` columns without deleting table data. It is intentionally
+not part of the recurring refresh task graph.
+
 `src/governance/99_cleanup.py` is a manual destructive cleanup notebook and is
 not part of any scheduled production workflow. Run it before the refresh when accepting a full rebuild after
 a breaking schema change. Set `catalog`, `schema`, and the exact confirmation value
