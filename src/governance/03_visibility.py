@@ -239,13 +239,18 @@ WITH cost AS (
 SELECT * EXCEPT (match_number) FROM joined WHERE match_number = 1
 """)
 
-requested = sum(
-    row["owner_resolution_status"] != "NOT_REQUESTED" for row in principal_rows)
-unavailable = sum(
-    row["owner_resolution_status"] in {"UNAVAILABLE", "ERROR"}
-    for row in principal_rows)
+status_counts = {}
+for row in principal_rows:
+    status = row["owner_resolution_status"]
+    status_counts[status] = status_counts.get(status, 0) + 1
 print(
     f"Published visibility outputs for {len(principal_rows)} service principals; "
-    f"requested direct owners for {requested} asset-owning principals; "
-    f"unavailable/failed for {unavailable}"
+    f"manager lookup statuses: {status_counts}"
 )
+for row in principal_rows:
+    if row["owner_resolution_status"] in {"UNAVAILABLE", "ERROR"}:
+        print(
+            "Direct-manager resolution is incomplete; sample reason: "
+            f"{row['owner_resolution_error']}"
+        )
+        break
