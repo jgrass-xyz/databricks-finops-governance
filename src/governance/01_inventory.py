@@ -3,7 +3,7 @@
 # MAGIC # Governance inventory snapshot
 # MAGIC
 # MAGIC Loads the enabled asset adapters, snapshots the active requirements, and
-# MAGIC records observed assets, tags, and policies at a daily grain.
+# MAGIC records observed assets and tags at a daily grain.
 
 # COMMAND ----------
 
@@ -28,7 +28,6 @@ if _notebook_dir not in sys.path:
 
 from _collectors import COLLECTORS
 from _normalize import merge_discovery_and_enrichment
-from _policy_terms import flatten_policy_terms, merge_policy_definitions, parse_definition
 from _system_discovery import SYSTEM_DISCOVERERS
 
 # A gitignored config/governance_assets_local.py takes precedence when present,
@@ -69,7 +68,7 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
         "collector": config["collector"],
         "cost_resolver": config["cost_resolver"],
         "required_tags": [str(v).strip().casefold() for v in config.get("required_tags", [])],
-        "required_policies": [str(v).strip().upper() for v in config.get("required_policies", [])],
+        "required_policies": [],
         "config_hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         "raw_config": canonical,
     })
@@ -95,6 +94,11 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
             enrichment_error = f"API enrichment failed: {type(error).__name__}: {error}"
             print(enrichment_error)
     collected = merge_discovery_and_enrichment(discovered, enriched)
+    # Policy attachment and definition collection are outside this pipeline's scope.
+    # Keep compatibility columns empty until the schema is deliberately simplified.
+    for asset in collected:
+        asset["policies"] = []
+        asset["policy_observation_complete"] = False
     asset_rows.extend(collected)
     run_rows.append({
         "workspace_id": workspace_id,
@@ -112,63 +116,6 @@ for asset_type, config in sorted(ASSET_TYPES.items()):
 
 # COMMAND ----------
 
-# Policy collection is optional. The compact visibility workflow disables it so
-# inventory remains a bounded system-table scan rather than an API call per policy.
-collect_policies = any(
-    config.get("collect_policies", True)
-    for config in ASSET_TYPES.values()
-    if config.get("enabled", False)
-)
-policy_rows_by_key = {}
-term_rows = []
-compute_policy_names = {}
-
-if collect_policies:
-    try:
-        for listed_policy in w.cluster_policies.list():
-            policy_id = str(listed_policy.policy_id)
-            policy = w.cluster_policies.get(policy_id).as_dict()
-            if policy.get("policy_family_id"):
-                family = w.policy_families.get(policy["policy_family_id"]).as_dict()
-                definition = merge_policy_definitions(
-                    family.get("definition"), policy.get("policy_family_definition_overrides"))
-                policy["resolved_policy_family"] = family
-            else:
-                definition = parse_definition(policy.get("definition"))
-            compute_policy_names[policy_id] = policy.get("name")
-            policy_rows_by_key[("COMPUTE_POLICY", policy_id)] = {
-                "workspace_id": workspace_id, "collection_run_id": collection_run_id,
-                "snapshot_ts": snapshot_ts, "policy_type": "COMPUTE_POLICY",
-                "policy_id": policy_id, "policy_name": policy.get("name"),
-                "description": policy.get("description"),
-                "definition_json": json.dumps(definition, sort_keys=True),
-                "policy_family_id": policy.get("policy_family_id"),
-                "raw_payload": json.dumps(policy, sort_keys=True, default=str),
-            }
-            for term in flatten_policy_terms(definition):
-                term_rows.append({
-                    "workspace_id": workspace_id, "collection_run_id": collection_run_id,
-                    "snapshot_ts": snapshot_ts, "policy_type": "COMPUTE_POLICY",
-                    "policy_id": policy_id, **term,
-                })
-    except Exception as error:
-        print(f"Policy definition enrichment failed: {type(error).__name__}: {error}")
-
-    for asset in asset_rows:
-        for policy in asset["policies"]:
-            if policy["policy_type"] == "COMPUTE_POLICY":
-                policy["policy_name"] = compute_policy_names.get(policy["policy_id"])
-            key = (policy["policy_type"], policy["policy_id"])
-            policy_rows_by_key.setdefault(key, {
-                "workspace_id": workspace_id, "collection_run_id": collection_run_id,
-                "snapshot_ts": snapshot_ts, "policy_type": policy["policy_type"],
-                "policy_id": policy["policy_id"], "policy_name": policy.get("policy_name"),
-                "description": None, "definition_json": None,
-                "policy_family_id": None, "raw_payload": None,
-            })
-
-policy_rows = list(policy_rows_by_key.values())
-
 tag_rows = [
     {
         "workspace_id": asset["workspace_id"],
@@ -185,15 +132,13 @@ tag_rows = [
 
 # COMMAND ----------
 
-# One canonical snapshot per UTC date. Replacement happens only after all collectors
-# and policy lookups have completed successfully.
+# One canonical asset/tag snapshot per UTC date. Replacement happens only after
+# all configured asset collectors have completed successfully.
 for table in (
     "governance_silver_collection_run",
     "governance_silver_requirement_snapshot",
     "governance_silver_asset_inventory_snapshot",
     "governance_silver_asset_tag_snapshot",
-    "governance_silver_policy_snapshot",
-    "governance_silver_policy_term_snapshot",
 ):
     spark.sql(f"""
     DELETE FROM {CATALOG_SCHEMA}.{table}
@@ -225,16 +170,6 @@ schemas = {
       workspace_id STRING, collection_run_id STRING, snapshot_ts TIMESTAMP,
       asset_type STRING, asset_id STRING, tag_key STRING, tag_value STRING
     """,
-    "governance_silver_policy_snapshot": """
-      workspace_id STRING, collection_run_id STRING, snapshot_ts TIMESTAMP,
-      policy_type STRING, policy_id STRING, policy_name STRING, description STRING,
-      definition_json STRING, policy_family_id STRING, raw_payload STRING
-    """,
-    "governance_silver_policy_term_snapshot": """
-      workspace_id STRING, collection_run_id STRING, snapshot_ts TIMESTAMP,
-      policy_type STRING, policy_id STRING, definition_path STRING, rule_type STRING,
-      rule_json STRING, hidden BOOLEAN, is_optional BOOLEAN
-    """,
 }
 
 rows_by_table = {
@@ -242,8 +177,6 @@ rows_by_table = {
     "governance_silver_requirement_snapshot": requirement_rows,
     "governance_silver_asset_inventory_snapshot": asset_rows,
     "governance_silver_asset_tag_snapshot": tag_rows,
-    "governance_silver_policy_snapshot": policy_rows,
-    "governance_silver_policy_term_snapshot": term_rows,
 }
 
 for table, rows in rows_by_table.items():
