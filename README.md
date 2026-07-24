@@ -35,6 +35,7 @@ Under `${catalog}.${schema}` (defaults `main.finops_observability`):
 | `backtest` | manual | Replay last 90d of `system.billing.usage` hour-by-hour, write per-cluster-day rows to `backtest_results` for ad-hoc query. |
 | `teardown` | manual | Drops the schema and everything in it. Safety lock: `confirm` widget must be set to `YES` or it no-ops. Does not delete bundle jobs — use `databricks bundle destroy` for that. |
 | `asset_governance_refresh` | daily 3 AM (PAUSED until validated) | Snapshots configured asset types and rebuilds the rolling cost-attribution window. |
+| `governance_schema_smoke_test` | manual | Recreates setup in a disposable schema, asserts exact table/view column contracts, and cleans up even after failure. |
 
 ## Asset governance views
 
@@ -97,12 +98,19 @@ Tag and requirement changes follow the same snapshot behavior.
 
 ### Destructive governance reset
 
-`src/governance/99_cleanup.py` is a manual cleanup notebook and is intentionally
-not part of any job. Run it before the refresh when accepting a full rebuild after
+`src/governance/99_cleanup.py` is a manual destructive cleanup notebook and is
+not part of any scheduled production workflow. Run it before the refresh when accepting a full rebuild after
 a breaking schema change. Set `catalog`, `schema`, and the exact confirmation value
 `DROP <catalog>.<schema>`; it drops governance/visibility views first and then their
 tables while retaining the schema. The next `asset_governance_refresh` recreates the
 current contract and rebuilds cost history according to the configured backfill.
+
+The manual `governance_schema_smoke_test` job automates a safe disposable test:
+`cleanup_before → setup → assert_schema → cleanup_after`. The assertion notebook
+checks exact ordered columns for every setup-created Silver table and Gold view.
+`cleanup_after` uses `ALL_DONE`, so the disposable objects are removed even when
+setup or an assertion fails. Override `governance_schema_test_schema` if needed;
+never point it at a schema containing real data.
 
 ## Deploying to a new workspace
 
@@ -201,6 +209,7 @@ unless `catalog` is overridden separately, writes to the generic `main` catalog.
 | `governance_cost_initial_backfill_days` | `365` | History loaded once when an asset type is first enabled. Reduce this before first deployment if desired. |
 | `visibility_billing_tag_key` | `application` | Selected custom billing tag in `visibility_asset_cost_daily`. |
 | `visibility_account_id` | empty | Optional account ID for resolving direct service-principal managers. |
+| `governance_schema_test_schema` | `finops_governance_schema_smoke_test` | Disposable schema for the manual setup/schema contract test. |
 | `slack_secret_scope` | `databricks-cost-alerts` | Databricks secret scope holding the Slack bot token. |
 | `slack_secret_key` | `slack-bot-token` | Key inside the scope holding the `xoxb-...` token. |
 | `slack_routing_mode` | `channel_only` | `channel_only` posts every alert to `slack_alert_channel`. `dm_with_fallback` DMs cluster owners and falls back to the channel for unmatched emails. |

@@ -41,6 +41,9 @@ variables:
   visibility_account_id:
     description: Optional Databricks account ID used to resolve direct service-principal managers.
     default: ""
+  governance_schema_test_schema:
+    description: Disposable schema used only by the manual setup/schema smoke test.
+    default: finops_governance_schema_smoke_test
   notifications_email:
     description: Email to CC on job failures. Leave empty to disable.
     default: ""

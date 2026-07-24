@@ -43,3 +43,43 @@ resources:
               schema: ${var.schema}
               billing_tag_key: ${var.visibility_billing_tag_key}
               account_id: ${var.visibility_account_id}
+
+    governance_schema_smoke_test:
+      name: databricks-finops-governance | governance_schema_smoke_test
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: cleanup_before
+          notebook_task:
+            notebook_path: ../src/governance/99_cleanup.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.governance_schema_test_schema}
+              confirm: DROP ${var.catalog}.${var.governance_schema_test_schema}
+        - task_key: setup
+          depends_on:
+            - task_key: cleanup_before
+          notebook_task:
+            notebook_path: ../src/governance/00_setup.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.governance_schema_test_schema}
+        - task_key: assert_schema
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../src/governance/04_schema_smoke_test.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.governance_schema_test_schema}
+        - task_key: cleanup_after
+          depends_on:
+            - task_key: cleanup_before
+            - task_key: setup
+            - task_key: assert_schema
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: ../src/governance/99_cleanup.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.governance_schema_test_schema}
+              confirm: DROP ${var.catalog}.${var.governance_schema_test_schema}
