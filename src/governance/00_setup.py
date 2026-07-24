@@ -18,29 +18,6 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG_SCHEMA}")
 
 # COMMAND ----------
 
-# Preserve deployed history while moving the governance module into an explicit
-# naming namespace. ALTER TABLE retains Delta history, permissions, and data.
-SILVER_TABLE_RENAMES = {
-    "governance_collection_run": "governance_silver_collection_run",
-    "governance_requirement_snapshot": "governance_silver_requirement_snapshot",
-    "asset_inventory_snapshot": "governance_silver_asset_inventory_snapshot",
-    "asset_tag_snapshot": "governance_silver_asset_tag_snapshot",
-    "policy_snapshot": "governance_silver_policy_snapshot",
-    "policy_term_snapshot": "governance_silver_policy_term_snapshot",
-    "asset_cost_daily": "governance_silver_asset_cost_daily",
-    "asset_tag_cost_daily": "governance_silver_asset_tag_cost_daily",
-    "governance_cost_refresh_state": "governance_silver_cost_refresh_state",
-}
-
-for legacy_name, current_name in SILVER_TABLE_RENAMES.items():
-    legacy_table = f"{CATALOG_SCHEMA}.{legacy_name}"
-    current_table = f"{CATALOG_SCHEMA}.{current_name}"
-    if spark.catalog.tableExists(legacy_table) and not spark.catalog.tableExists(current_table):
-        spark.sql(f"ALTER TABLE {legacy_table} RENAME TO {current_table}")
-        print(f"Renamed {legacy_table} to {current_table}")
-
-# COMMAND ----------
-
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_collection_run (
   workspace_id STRING NOT NULL,
@@ -198,36 +175,8 @@ CREATE TABLE IF NOT EXISTS {CATALOG_SCHEMA}.governance_silver_cost_refresh_state
 USING DELTA
 """)
 
-# Lightweight forward migration for dev/prod schemas created by an earlier bundle.
-for table in ("governance_silver_asset_cost_daily", "governance_silver_asset_tag_cost_daily"):
-    if "pricing_source" not in spark.table(f"{CATALOG_SCHEMA}.{table}").columns:
-        spark.sql(f"ALTER TABLE {CATALOG_SCHEMA}.{table} ADD COLUMNS (pricing_source STRING)")
-
-inventory_columns = spark.table(
-    f"{CATALOG_SCHEMA}.governance_silver_asset_inventory_snapshot").columns
-if "discovery_source" not in inventory_columns:
-    spark.sql(f"""
-      ALTER TABLE {CATALOG_SCHEMA}.governance_silver_asset_inventory_snapshot
-      ADD COLUMNS (discovery_source STRING, api_enriched BOOLEAN)
-    """)
-inventory_columns = spark.table(
-    f"{CATALOG_SCHEMA}.governance_silver_asset_inventory_snapshot").columns
-if "tag_observation_complete" not in inventory_columns:
-    spark.sql(f"""
-      ALTER TABLE {CATALOG_SCHEMA}.governance_silver_asset_inventory_snapshot
-      ADD COLUMNS (
-        tag_observation_complete BOOLEAN,
-        policy_observation_complete BOOLEAN
-      )
-    """)
-
-refresh_state_columns = spark.table(
-    f"{CATALOG_SCHEMA}.governance_silver_cost_refresh_state").columns
-if "resolver_hash" not in refresh_state_columns:
-    spark.sql(f"""
-      ALTER TABLE {CATALOG_SCHEMA}.governance_silver_cost_refresh_state
-      ADD COLUMNS (resolver_hash STRING)
-    """)
+# Setup defines the current contract only. Schema migrations belong in explicit,
+# versioned migration tasks rather than the normal refresh path.
 
 # COMMAND ----------
 
@@ -534,16 +483,5 @@ SELECT
 FROM values
 GROUP BY ALL
 """)
-
-# Remove the pre-standardization Gold names only after every replacement view is
-# available. Silver legacy names were renamed above, so no duplicate tables remain.
-for legacy_view in (
-    "gold_asset_governance_history",
-    "gold_asset_governance_current",
-    "gold_asset_governance_daily",
-    "gold_governance_config_history",
-    "gold_observed_tags_policies_current",
-):
-    spark.sql(f"DROP VIEW IF EXISTS {CATALOG_SCHEMA}.{legacy_view}")
 
 print(f"Governance Silver tables and Gold views ensured in {CATALOG_SCHEMA}")
