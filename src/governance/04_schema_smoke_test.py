@@ -101,7 +101,27 @@ for object_name, expected in EXPECTED_COLUMNS.items():
     else:
         print(f"PASS {object_name}: {len(actual)} columns")
 
+# The preceding inventory_write task must have successfully written the current
+# runtime contract into the constrained Delta tables. Verify that this was a real
+# write, not merely a successful setup/schema compilation.
+written_counts = {
+    table: spark.table(f"{CATALOG_SCHEMA}.{table}").count()
+    for table in (
+        "governance_silver_collection_run",
+        "governance_silver_requirement_snapshot",
+        "governance_silver_asset_inventory_snapshot",
+    )
+}
+for table, row_count in written_counts.items():
+    if row_count == 0:
+        failures.append(f"{table}: inventory write produced no rows")
+    else:
+        print(f"PASS {table}: inventory wrote {row_count} rows")
+
 if failures:
     raise AssertionError("Schema smoke test failed:\n\n" + "\n\n".join(failures))
 
-print(f"PASS: validated {len(EXPECTED_COLUMNS)} schemas in {CATALOG_SCHEMA}")
+print(
+    f"PASS: validated {len(EXPECTED_COLUMNS)} schemas and inventory writes "
+    f"in {CATALOG_SCHEMA}"
+)

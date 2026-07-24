@@ -63,9 +63,17 @@ resources:
             base_parameters:
               catalog: ${var.catalog}
               schema: ${var.governance_schema_test_schema}
-        - task_key: assert_schema
+        - task_key: inventory_write
           depends_on:
             - task_key: setup
+          notebook_task:
+            notebook_path: ../src/governance/01_inventory.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.governance_schema_test_schema}
+        - task_key: assert_schema
+          depends_on:
+            - task_key: inventory_write
           notebook_task:
             notebook_path: ../src/governance/04_schema_smoke_test.py
             base_parameters:
@@ -75,6 +83,7 @@ resources:
           depends_on:
             - task_key: cleanup_before
             - task_key: setup
+            - task_key: inventory_write
             - task_key: assert_schema
           run_if: ALL_DONE
           notebook_task:

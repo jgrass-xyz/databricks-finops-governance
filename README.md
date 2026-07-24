@@ -106,11 +106,14 @@ tables while retaining the schema. The next `asset_governance_refresh` recreates
 current contract and rebuilds cost history according to the configured backfill.
 
 The manual `governance_schema_smoke_test` job automates a safe disposable test:
-`cleanup_before → setup → assert_schema → cleanup_after`. The assertion notebook
-checks exact ordered columns for every setup-created Silver table and Gold view.
-`cleanup_after` uses `ALL_DONE`, so the disposable objects are removed even when
-setup or an assertion fails. Override `governance_schema_test_schema` if needed;
-never point it at a schema containing real data.
+`cleanup_before → setup → inventory_write → assert_schema → cleanup_after`. It runs
+the real inventory writer so Delta `NOT NULL`, generated-column, and write-schema
+incompatibilities fail the test instead of escaping schema-only validation. The
+assertion notebook then checks exact ordered columns for every setup-created Silver
+table and Gold view, plus non-empty inventory output. `cleanup_after` uses `ALL_DONE`,
+so disposable objects are removed even when setup, writing, or assertions fail.
+Override `governance_schema_test_schema` if needed; never point it at a schema
+containing real data.
 
 ## Deploying to a new workspace
 
